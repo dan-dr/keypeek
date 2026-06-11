@@ -21,7 +21,12 @@ pub fn hid_usage_to_layout_key(usage: HidUsage) -> LayoutKey {
 
     let base = usage.base();
     let base_label = if let Some(base_keycode) = base.known_keycode() {
-        keycode_to_layout_key(&base_keycode).tap.full
+        let base_key = keycode_to_layout_key(&base_keycode);
+        if let Some(symbol) = base_key.symbol {
+            symbol
+        } else {
+            base_key.tap.full
+        }
     } else {
         format!("0x{:08X}", base.to_hid_usage())
     };

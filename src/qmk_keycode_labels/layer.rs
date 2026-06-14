@@ -1,52 +1,71 @@
-use crate::layout_key::{Label, LayoutKey};
+use crate::layout_key::{behavior_names, BorderStyle, Label, LayoutKey};
 use crate::qmk_keycode_labels::constants::*;
 
 pub fn get_layer_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
-    // Pure layer-switch/behavior keys render as a single QMK-style label in `tap`
-    // (e.g. "MO(2)"); only the tap/hold behaviors (MT/LT) use the function strip.
-    let (tap_label, layer_ref) = match keycode_bytes {
+    // Layer-switch keys are indicated solely by their border (Solid = persists,
+    // Dashed = active while held, Dotted = one-shot) and center on the target
+    // layer, so they carry no legend strip. The non-layer behaviors here (tap
+    // dance / macro / custom) instead keep a name strip and the default border.
+    let (behavior, center, layer_ref, border) = match keycode_bytes {
         b if QK_TO.contains(&b) => {
             let l = (b - QK_TO.start) as u8;
-            (format!("TO({})", l), Some(l))
+            (None, format!("L{}", l), Some(l), BorderStyle::Solid)
         }
         b if QK_MOMENTARY.contains(&b) => {
             let l = (b - QK_MOMENTARY.start) as u8;
-            (format!("MO({})", l), Some(l))
+            (None, format!("L{}", l), Some(l), BorderStyle::Dashed)
         }
         b if QK_TOGGLE_LAYER.contains(&b) => {
             let l = (b - QK_TOGGLE_LAYER.start) as u8;
-            (format!("TG({})", l), Some(l))
+            (None, format!("L{}", l), Some(l), BorderStyle::Solid)
         }
         b if QK_ONE_SHOT_LAYER.contains(&b) => {
             let l = (b - QK_ONE_SHOT_LAYER.start) as u8;
-            (format!("OSL({})", l), Some(l))
+            (None, format!("L{}", l), Some(l), BorderStyle::Dotted)
         }
         b if QK_LAYER_TAP_TOGGLE.contains(&b) => {
             let l = (b - QK_LAYER_TAP_TOGGLE.start) as u8;
-            (format!("TT({})", l), Some(l))
+            (None, format!("L{}", l), Some(l), BorderStyle::Dashed)
         }
         b if QK_DEF_LAYER.contains(&b) => {
             let l = (b - QK_DEF_LAYER.start) as u8;
-            (format!("DF({})", l), None)
+            (None, format!("L{}", l), None, BorderStyle::Solid)
         }
         b if QK_TAP_DANCE.contains(&b) => {
             let n = b - QK_TAP_DANCE.start;
-            (format!("TD({})", n), None)
+            (
+                Some(behavior_names::TAP_DANCE.label()),
+                n.to_string(),
+                None,
+                BorderStyle::None,
+            )
         }
         b if QK_KB.contains(&b) => {
             let n = b - QK_KB.start;
-            (format!("CUSTOM({})", n), None)
+            (
+                Some(behavior_names::CUSTOM.label()),
+                n.to_string(),
+                None,
+                BorderStyle::None,
+            )
         }
         b if QK_MACRO.contains(&b) => {
             let n = b - QK_MACRO.start;
-            (format!("MACRO({})", n), None)
+            (
+                Some(behavior_names::MACRO.label()),
+                n.to_string(),
+                None,
+                BorderStyle::None,
+            )
         }
         _ => return None,
     };
 
     Some(LayoutKey {
-        tap: Label::new(tap_label),
+        tap: Label::new(center),
+        behavior,
         layer_ref,
+        border,
         ..Default::default()
     })
 }

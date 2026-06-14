@@ -1,5 +1,5 @@
 use crate::layout_key::modifier_symbols;
-use crate::layout_key::{KeycodeKind, Label, LayoutKey};
+use crate::layout_key::{behavior_names, BorderStyle, KeycodeKind, Label, LayoutKey};
 use crate::qmk_keycode_labels::basic::get_basic_layout_key;
 use crate::qmk_keycode_labels::constants::*;
 
@@ -22,15 +22,15 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
                 }
             }
 
-            // Otherwise show the modified key in `tap` and the applied modifiers as
-            // glyphs in the function strip (e.g. "C" + "⎈" for LCTL(KC_C)).
+            // Otherwise show the key in `tap` and the modifiers as glyphs in the argument
+            // strip (e.g. "C" + "⎈" for LCTL(KC_C)).
             let (tap, symbol) = match inner_key {
                 Some(k) => (k.tap, k.symbol),
                 None => (Label::new(format!("0x{:02X}", keycode)), None),
             };
             Some(LayoutKey {
                 tap,
-                function: Some(mod_value_to_label(input_modifiers >> 8)),
+                argument: Some(mod_value_to_label(input_modifiers >> 8)),
                 symbol,
                 kind: KeycodeKind::Modifier,
                 ..Default::default()
@@ -47,7 +47,8 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
 
             Some(LayoutKey {
                 tap: tap_key.tap,
-                function: Some(mod_label.prefixed("MT: ")),
+                behavior: Some(behavior_names::MOD_TAP.label()),
+                argument: Some(mod_label),
                 shifted: tap_key.shifted,
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Basic,
@@ -56,19 +57,13 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
         }
         input_bytes if QK_LAYER_MOD.contains(&input_bytes) => {
             let remainder = input_bytes & !(QK_LAYER_MOD.start);
-            let mask = 0x1f;
-            let shift = 5;
-
-            let layer = remainder >> shift;
-
-            let mod_value = remainder & mask;
-            let mod_label = mod_value_to_label(mod_value);
+            let layer = remainder >> 5;
 
             Some(LayoutKey {
                 tap: Label::new(format!("L{}", layer)),
-                function: Some(mod_label),
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(layer as u8),
+                border: BorderStyle::Dashed,
                 ..Default::default()
             })
         }
@@ -79,7 +74,7 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
 
             Some(LayoutKey {
                 tap: mod_label,
-                function: Some(Label::new("OSM")),
+                behavior: Some(behavior_names::ONE_SHOT_MOD.label()),
                 kind: KeycodeKind::Modifier,
                 ..Default::default()
             })
@@ -94,11 +89,12 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
 
             Some(LayoutKey {
                 tap: tap_key.tap,
-                function: Some(Label::new(format!("L{}", layer))),
                 shifted: tap_key.shifted,
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(layer as u8),
+                border: BorderStyle::Dashed,
+                ..Default::default()
             })
         }
         _ => None,

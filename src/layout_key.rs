@@ -104,12 +104,69 @@ pub mod modifier_symbols {
     }
 }
 
+/// Behavior display names for the top strip, as `(full, short)` pairs. Shared by
+/// the ZMK and QMK label producers so both render the same wording.
+pub mod behavior_names {
+    use super::Label;
+
+    pub struct BehaviorName {
+        pub full: &'static str,
+        pub short: &'static str,
+    }
+
+    impl BehaviorName {
+        pub fn label(&self) -> Label {
+            Label::with_short(self.full, self.short)
+        }
+    }
+
+    macro_rules! behavior_name {
+        ($name:ident, $full:expr, $short:expr) => {
+            pub const $name: BehaviorName = BehaviorName {
+                full: $full,
+                short: $short,
+            };
+        };
+    }
+
+    // Only behaviors that get a top-strip legend live here; pure layer-switch
+    // behaviors are shown by their border alone and need no entry.
+    behavior_name!(MOD_TAP, "Mod-Tap", "MT");
+    behavior_name!(ONE_SHOT_MOD, "One-Shot Mod", "OSM");
+    behavior_name!(STICKY_KEY, "Sticky Key", "SK");
+    behavior_name!(KEY_TOGGLE, "Key Toggle", "KT");
+    behavior_name!(TAP_DANCE, "Tap Dance", "TD");
+    behavior_name!(MACRO, "Macro", "MACRO");
+    behavior_name!(CUSTOM, "Custom", "CUSTOM");
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum KeycodeKind {
     #[default]
     Basic,
     Modifier,
     Special,
+}
+
+/// Outline style for a key's border. Layer-switch keys use a heavier styled
+/// outline as a visual hint for *how* the layer activates; everything else keeps
+/// the default thin solid border (`None`). The line pattern carries the meaning,
+/// so different behaviors that activate a layer the same way share a style — the
+/// redundancy is intentional.
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum BorderStyle {
+    /// Default thin solid border (plain keys and non-layer behaviors).
+    #[default]
+    None,
+    /// Solid, medium-width outline — layer change persists after release
+    /// (toggle / to-layer / default-layer).
+    Solid,
+    /// Striped outline — the layer is active only while the key is held
+    /// (momentary / layer-tap / layer-mod / layer-tap-toggle).
+    Dashed,
+    /// Dotted outline — the layer is active for one keypress, then reverts
+    /// (one-shot layer / sticky layer).
+    Dotted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -136,15 +193,6 @@ impl Label {
         }
     }
 
-    /// Returns a copy with `prefix` prepended to both the full and short forms,
-    /// e.g. `Label{full:"Ctrl",short:"Ctl"}.prefixed("MT: ")` -> "MT: Ctrl"/"MT: Ctl".
-    pub fn prefixed(&self, prefix: &str) -> Label {
-        Label {
-            full: format!("{prefix}{}", self.full),
-            short: self.short.as_ref().map(|s| format!("{prefix}{s}")),
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.full.is_empty()
     }
@@ -155,10 +203,12 @@ pub struct LayoutKey {
     /// Primary key action label (e.g., "A", "Enter", "L1")
     pub tap: Label,
 
-    /// Secondary "function" legend describing the key's modifier, target layer,
-    /// or behavior (e.g. "⎈" for MT, "L2" for LT, "MO"/"OSM"/"Toggle"). Rendered
-    /// in a small strip along the bottom edge of the key.
-    pub function: Option<Label>,
+    /// Behavior name shown in the top strip (e.g. "Mod-Tap"). `None` for plain keys.
+    pub behavior: Option<Label>,
+
+    /// Behavior argument shown in the bottom strip (e.g. "Ctrl" for Mod-Tap, "L2"
+    /// for Layer-Tap). `None` when there is no argument.
+    pub argument: Option<Label>,
 
     /// Shifted character shown above `tap` (e.g. "!" for KC_1).
     pub shifted: Option<String>,
@@ -171,17 +221,22 @@ pub struct LayoutKey {
 
     /// Layer this key activates (for MO, LT, TO, etc.) - used for coloring
     pub layer_ref: Option<u8>,
+
+    /// Outline style hinting how this key activates a layer. `None` for plain keys.
+    pub border: BorderStyle,
 }
 
 impl Default for LayoutKey {
     fn default() -> Self {
         LayoutKey {
             tap: Label::default(),
-            function: None,
+            behavior: None,
+            argument: None,
             shifted: None,
             symbol: None,
             kind: KeycodeKind::Basic,
             layer_ref: None,
+            border: BorderStyle::None,
         }
     }
 }

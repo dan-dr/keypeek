@@ -1,4 +1,4 @@
-use crate::layout_key::{KeycodeKind, Label, LayoutKey};
+use crate::layout_key::{behavior_names, BorderStyle, KeycodeKind, Label, LayoutKey};
 use zmk_studio_api::Behavior;
 
 use super::hid_usage::hid_usage_to_layout_key;
@@ -14,52 +14,58 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
         Behavior::KeyPress(keycode) => Some(hid_usage_to_layout_key(*keycode)),
         Behavior::KeyToggle(keycode) => {
             let mut key = hid_usage_to_layout_key(*keycode);
-            key.function = Some(Label::new("Toggle"));
+            key.behavior = Some(behavior_names::KEY_TOGGLE.label());
             Some(key)
         }
         Behavior::MomentaryLayer { layer_id } => {
-            Some(layer_layout_key("MO", *layer_id, layer_names))
+            Some(layer_layout_key(BorderStyle::Dashed, *layer_id, layer_names))
         }
-        Behavior::ToggleLayer { layer_id } => Some(layer_layout_key("TG", *layer_id, layer_names)),
-        Behavior::ToLayer { layer_id } => Some(layer_layout_key("TO", *layer_id, layer_names)),
-        Behavior::StickyLayer { layer_id } => Some(layer_layout_key("SL", *layer_id, layer_names)),
+        Behavior::ToggleLayer { layer_id } => {
+            Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
+        }
+        Behavior::ToLayer { layer_id } => {
+            Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
+        }
+        Behavior::StickyLayer { layer_id } => {
+            Some(layer_layout_key(BorderStyle::Dotted, *layer_id, layer_names))
+        }
         Behavior::LayerTap { layer_id, tap } => {
             let tap_key = hid_usage_to_layout_key(*tap);
-            let target = layer_name(layer_names, *layer_id)
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("L{}", layer_id));
             Some(LayoutKey {
                 tap: tap_key.tap,
-                function: Some(Label::new(format!("LT: {}", target))),
                 shifted: tap_key.shifted,
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(*layer_id as u8),
+                border: BorderStyle::Dashed,
+                ..Default::default()
             })
         }
         Behavior::ModTap { hold, tap } => {
             let hold_key = hid_usage_to_layout_key(*hold);
             let tap_key = hid_usage_to_layout_key(*tap);
-            // A glyph modifier has no shorter form; a text modifier carries its
-            // short name in `tap`, so the "MT:" legend can shrink to fit.
+            // Glyph modifiers have no short form; text modifiers carry one in `tap` so
+            // the argument strip can shrink.
             let mod_label = match hold_key.symbol {
                 Some(sym) => Label::new(sym),
                 None => hold_key.tap,
             };
             Some(LayoutKey {
                 tap: tap_key.tap,
-                function: Some(mod_label.prefixed("MT: ")),
+                behavior: Some(behavior_names::MOD_TAP.label()),
+                argument: Some(mod_label),
                 shifted: tap_key.shifted,
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Basic,
                 layer_ref: None,
+                border: BorderStyle::None,
             })
         }
         Behavior::StickyKey(keycode) => {
             let key = hid_usage_to_layout_key(*keycode);
             Some(LayoutKey {
                 tap: key.tap,
-                function: Some(Label::new("OS")),
+                behavior: Some(behavior_names::STICKY_KEY.label()),
                 shifted: key.shifted,
                 symbol: key.symbol,
                 kind: KeycodeKind::Modifier,
@@ -258,20 +264,25 @@ fn decode_mouse_xy(value: u32) -> (i16, i16) {
     (x, y)
 }
 
-fn layer_layout_key(abbreviation: &str, layer_id: u32, layer_names: &[String]) -> LayoutKey {
-    let target = layer_name(layer_names, layer_id)
-        .map(str::to_string)
-        .unwrap_or_else(|| layer_id.to_string());
+/// Build a pure layer-switch key: the target layer is the centered label and
+/// `border` is the sole indicator — no legend strips.
+fn layer_layout_key(border: BorderStyle, layer_id: u32, layer_names: &[String]) -> LayoutKey {
     LayoutKey {
-        tap: Label::new(format!("{}({})", abbreviation, target)),
+        tap: layer_arg_label(layer_names, layer_id),
         kind: KeycodeKind::Special,
         layer_ref: Some(layer_id as u8),
+        border,
         ..Default::default()
     }
 }
 
-/// The user-facing name of layer `id`, or `None` if the device reports no
-/// (non-empty) name for it (e.g. VIA/Vial, or an unnamed ZMK layer).
+fn layer_arg_label(layer_names: &[String], layer_id: u32) -> Label {
+    match layer_name(layer_names, layer_id) {
+        Some(name) => Label::new(name),
+        None => Label::new(format!("L{}", layer_id)),
+    }
+}
+
 fn layer_name(layer_names: &[String], id: u32) -> Option<&str> {
     layer_names
         .get(id as usize)

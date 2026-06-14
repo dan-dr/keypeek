@@ -17,18 +17,22 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             key.behavior = Some(behavior_names::KEY_TOGGLE.label());
             Some(key)
         }
-        Behavior::MomentaryLayer { layer_id } => {
-            Some(layer_layout_key(BorderStyle::Dashed, *layer_id, layer_names))
-        }
+        Behavior::MomentaryLayer { layer_id } => Some(layer_layout_key(
+            BorderStyle::Dashed,
+            *layer_id,
+            layer_names,
+        )),
         Behavior::ToggleLayer { layer_id } => {
             Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
         }
         Behavior::ToLayer { layer_id } => {
             Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
         }
-        Behavior::StickyLayer { layer_id } => {
-            Some(layer_layout_key(BorderStyle::Dotted, *layer_id, layer_names))
-        }
+        Behavior::StickyLayer { layer_id } => Some(layer_layout_key(
+            BorderStyle::Dotted,
+            *layer_id,
+            layer_names,
+        )),
         Behavior::LayerTap { layer_id, tap } => {
             let tap_key = hid_usage_to_layout_key(*tap);
             Some(LayoutKey {
@@ -74,37 +78,30 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
         }
         Behavior::CapsWord => Some(LayoutKey {
             tap: Label::with_short("Caps Word", "CW"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::KeyRepeat => Some(LayoutKey {
             tap: Label::with_short("Key Repeat", "Rep"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::Reset => Some(LayoutKey {
             tap: Label::new("Reset"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::Bootloader => Some(LayoutKey {
             tap: Label::with_short("Bootloader", "Boot"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::SoftOff => Some(LayoutKey {
             tap: Label::with_short("Soft Off", "Off"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::StudioUnlock => Some(LayoutKey {
             tap: Label::with_short("Studio Unlock", "Unlock"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::GraveEscape => Some(LayoutKey {
             tap: Label::with_short("Grave Esc", "G/E"),
-            kind: KeycodeKind::Special,
             ..Default::default()
         }),
         Behavior::Bluetooth { command, value } => {
@@ -119,7 +116,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -133,7 +129,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -146,7 +141,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -163,7 +157,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -188,7 +181,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -203,7 +195,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -218,7 +209,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -233,7 +223,6 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             };
             Some(LayoutKey {
                 tap: label,
-                kind: KeycodeKind::Special,
                 ..Default::default()
             })
         }
@@ -269,7 +258,7 @@ fn decode_mouse_xy(value: u32) -> (i16, i16) {
 fn layer_layout_key(border: BorderStyle, layer_id: u32, layer_names: &[String]) -> LayoutKey {
     LayoutKey {
         tap: layer_arg_label(layer_names, layer_id),
-        kind: KeycodeKind::Special,
+        kind: KeycodeKind::Modifier,
         layer_ref: Some(layer_id as u8),
         border,
         ..Default::default()

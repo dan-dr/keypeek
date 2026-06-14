@@ -40,11 +40,15 @@ pub fn hid_usage_to_layout_key(usage: HidUsage) -> LayoutKey {
 
     // Otherwise show the key in `tap` and the modifiers as glyphs in the argument
     // strip (e.g. "C" + "⎈" for LC(C)).
-    let (tap, symbol) = if let Some(base_keycode) = base.known_keycode() {
+    let (tap, symbol, kind) = if let Some(base_keycode) = base.known_keycode() {
         let base_key = keycode_to_layout_key(&base_keycode);
-        (base_key.tap, base_key.symbol)
+        (base_key.tap, base_key.symbol, base_key.kind)
     } else {
-        (Label::new(format!("0x{:08X}", base.to_hid_usage())), None)
+        (
+            Label::new(format!("0x{:08X}", base.to_hid_usage())),
+            None,
+            KeycodeKind::Basic,
+        )
     };
 
     LayoutKey {
@@ -56,7 +60,7 @@ pub fn hid_usage_to_layout_key(usage: HidUsage) -> LayoutKey {
             mods & (MOD_LGUI | MOD_RGUI) != 0,
         )),
         symbol,
-        kind: KeycodeKind::Modifier,
+        kind,
         ..Default::default()
     }
 }

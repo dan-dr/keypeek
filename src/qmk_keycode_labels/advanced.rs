@@ -63,7 +63,7 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
                 tap: Label::new(format!("L{}", layer)),
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(layer as u8),
-                border: BorderStyle::Dashed,
+                border: BorderStyle::None,
                 ..Default::default()
             })
         }
@@ -93,7 +93,7 @@ pub fn get_advanced_layout_key(keycode_bytes: u16) -> Option<LayoutKey> {
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(layer as u8),
-                border: BorderStyle::Dashed,
+                border: BorderStyle::None,
                 ..Default::default()
             })
         }

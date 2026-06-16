@@ -357,17 +357,6 @@ impl OverlayApp {
                     ui.painter().add(shape);
                 }
             }
-            BorderStyle::Dotted => {
-                let points = rounded_rect_outline(rect, corner_radius, center, angle);
-                for shape in egui::Shape::dotted_line(
-                    &points,
-                    stroke.color,
-                    0.06 * size,
-                    stroke.width * 0.75,
-                ) {
-                    ui.painter().add(shape);
-                }
-            }
         }
     }
 
@@ -501,7 +490,7 @@ impl OverlayApp {
                             (
                                 layout_key.border,
                                 0.02 * size,
-                                fill_color.lerp_to_gamma(egui::Color32::WHITE, 0.3),
+                                fill_color.lerp_to_gamma(egui::Color32::WHITE, 0.45),
                             )
                         };
                     self.paint_key_border(

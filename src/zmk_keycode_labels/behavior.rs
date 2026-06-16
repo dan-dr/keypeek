@@ -18,7 +18,7 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             Some(key)
         }
         Behavior::MomentaryLayer { layer_id } => Some(layer_layout_key(
-            BorderStyle::Dashed,
+            BorderStyle::None,
             *layer_id,
             layer_names,
         )),
@@ -29,7 +29,7 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
         }
         Behavior::StickyLayer { layer_id } => Some(layer_layout_key(
-            BorderStyle::Dotted,
+            BorderStyle::Dashed,
             *layer_id,
             layer_names,
         )),
@@ -41,7 +41,7 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
                 symbol: tap_key.symbol,
                 kind: KeycodeKind::Modifier,
                 layer_ref: Some(*layer_id as u8),
-                border: BorderStyle::Dashed,
+                border: BorderStyle::None,
                 ..Default::default()
             })
         }

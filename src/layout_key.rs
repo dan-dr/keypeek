@@ -148,25 +148,21 @@ pub enum KeycodeKind {
     Special,
 }
 
-/// Outline style for a key's border. Layer-switch keys use a heavier styled
-/// outline as a visual hint for *how* the layer activates; everything else keeps
-/// the default thin solid border (`None`). The line pattern carries the meaning,
-/// so different behaviors that activate a layer the same way share a style — the
-/// redundancy is intentional.
+/// Outline style hinting *how* a layer activates: persistent changes get a solid
+/// outline, sticky/one-shot get a striped one, momentary keeps the default border.
+/// Behaviors that activate a layer the same way share a style — intentionally.
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum BorderStyle {
-    /// Default thin solid border (plain keys and non-layer behaviors).
+    /// Default thin border: plain keys, non-layer behaviors, and momentary/while-held
+    /// layer keys (momentary / layer-tap / layer-mod / layer-tap-toggle).
     #[default]
     None,
     /// Solid, medium-width outline — layer change persists after release
     /// (toggle / to-layer / default-layer).
     Solid,
-    /// Striped outline — the layer is active only while the key is held
-    /// (momentary / layer-tap / layer-mod / layer-tap-toggle).
+    /// Striped outline — layer active for one keypress, then reverts
+    /// (one-shot / sticky layer).
     Dashed,
-    /// Dotted outline — the layer is active for one keypress, then reverts
-    /// (one-shot layer / sticky layer).
-    Dotted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]

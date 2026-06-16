@@ -1,7 +1,11 @@
 use crate::keyboard::Keyboard;
-use crate::protocols::{connect_protocol, ConnectionSpec, KeyboardDefinition, KeyboardProtocol};
+use crate::protocols::{
+    connect_protocol, ConnectionSpec, DeviceLocked, KeyboardDefinition, KeyboardProtocol, Reopener,
+};
 use crate::ui_wake::UiWake;
+use std::error::Error;
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::Arc;
 
 const ZMK_LOCKED_ERROR: &str = "Device is locked. Please press the ZMK Studio unlock key combination on your keyboard, then click Connect again.";
 
@@ -9,11 +13,16 @@ pub struct ConnectionRequest {
     pub spec: ConnectionSpec,
     pub timeout: i64,
     pub layout_name: Option<String>,
+    pub reopen: Option<Arc<dyn Reopener>>,
 }
 
 impl ConnectionRequest {
-    fn connect_protocol(&self) -> Result<Box<dyn KeyboardProtocol>, String> {
-        connect_protocol(&self.spec).map_err(|e| format_connect_error(&self.spec, &e.to_string()))
+    fn open_protocol(&self) -> Result<Box<dyn KeyboardProtocol>, String> {
+        let result = match &self.reopen {
+            Some(reopener) => reopener.reopen(),
+            None => connect_protocol(&self.spec),
+        };
+        result.map_err(|e| format_connect_error(&self.spec, e.as_ref()))
     }
 
     fn pick_layout_name(&self, layout_names: &[String]) -> Result<String, String> {
@@ -31,15 +40,15 @@ impl ConnectionRequest {
     }
 }
 
-fn format_connect_error(spec: &ConnectionSpec, error_text: &str) -> String {
+fn format_connect_error(spec: &ConnectionSpec, error: &(dyn Error + 'static)) -> String {
     if matches!(spec, ConnectionSpec::Zmk { .. }) {
-        if error_text == "DEVICE_LOCKED" {
+        if error.downcast_ref::<DeviceLocked>().is_some() {
             return ZMK_LOCKED_ERROR.to_string();
         }
-        return format!("ZMK error: {error_text}");
+        return format!("ZMK error: {error}");
     }
 
-    format!("Failed to connect to device: {error_text}")
+    format!("Failed to connect to device: {error}")
 }
 
 pub struct ConnectedState {
@@ -47,6 +56,7 @@ pub struct ConnectedState {
     pub layout_names: Vec<String>,
     pub selected_layout_name: String,
     pub keyboard: Keyboard,
+    pub reopen: Option<Arc<dyn Reopener>>,
 }
 
 pub struct ConnectionTask {
@@ -79,8 +89,9 @@ pub fn build_connected_state(
     request: ConnectionRequest,
     ui_wake: UiWake,
 ) -> Result<ConnectedState, String> {
-    let protocol = request.connect_protocol()?;
+    let protocol = request.open_protocol()?;
 
+    let reopen = protocol.reopener();
     let layout_names = protocol.get_layout_definition().get_layout_names();
     let selected_layout_name = request.pick_layout_name(&layout_names)?;
     let definition = protocol.get_layout_definition().clone();
@@ -98,5 +109,6 @@ pub fn build_connected_state(
         layout_names,
         selected_layout_name,
         keyboard,
+        reopen,
     })
 }

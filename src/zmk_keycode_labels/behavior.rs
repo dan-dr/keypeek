@@ -17,11 +17,9 @@ pub fn behavior_to_layout_key(behavior: &Behavior, layer_names: &[String]) -> Op
             key.behavior = Some(behavior_names::KEY_TOGGLE.label());
             Some(key)
         }
-        Behavior::MomentaryLayer { layer_id } => Some(layer_layout_key(
-            BorderStyle::None,
-            *layer_id,
-            layer_names,
-        )),
+        Behavior::MomentaryLayer { layer_id } => {
+            Some(layer_layout_key(BorderStyle::None, *layer_id, layer_names))
+        }
         Behavior::ToggleLayer { layer_id } => {
             Some(layer_layout_key(BorderStyle::Solid, *layer_id, layer_names))
         }

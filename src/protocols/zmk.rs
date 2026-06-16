@@ -1,19 +1,34 @@
 use super::layout_geometry::flattened_top_left_after_center_rotation;
 use super::zmk_rpc::{self, ZmkData, ZmkTransport};
-use super::{Key, KeyboardDefinition, KeyboardLayout, KeyboardProtocol};
+use super::{Key, KeyboardDefinition, KeyboardLayout, KeyboardProtocol, Reopener};
 use crate::layout_key::LayoutKey;
 use hidapi::{HidApi, HidDevice};
 use std::error::Error;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 type LayerKeys3d = Vec<Vec<Vec<Option<LayoutKey>>>>;
 const ZMK_USAGE_PAGE: u16 = 0xff60;
 
-pub struct ZmkProtocol {
-    hid_device: HidDevice,
+struct ZmkLayout {
     definition: KeyboardDefinition,
     layout_keys: LayerKeys3d,
     layer_count: usize,
+}
+
+pub struct ZmkProtocol {
+    hid_device: HidDevice,
+    layout: Arc<ZmkLayout>,
+}
+
+struct ZmkReopener {
+    layout: Arc<ZmkLayout>,
+}
+
+impl Reopener for ZmkReopener {
+    fn reopen(&self) -> Result<Box<dyn KeyboardProtocol>, Box<dyn Error>> {
+        Ok(Box::new(ZmkProtocol::open_hid(Arc::clone(&self.layout))?))
+    }
 }
 
 impl ZmkProtocol {
@@ -23,6 +38,16 @@ impl ZmkProtocol {
         transport: &ZmkTransport,
     ) -> Result<Self, Box<dyn Error>> {
         let zmk_data = zmk_rpc::fetch_zmk_data(transport)?;
+        let (definition, layout_keys, layer_count) = build_from_zmk_data(vid, pid, zmk_data)?;
+        Self::open_hid(Arc::new(ZmkLayout {
+            definition,
+            layout_keys,
+            layer_count,
+        }))
+    }
+
+    fn open_hid(layout: Arc<ZmkLayout>) -> Result<Self, Box<dyn Error>> {
+        let (vid, pid) = (layout.definition.vid, layout.definition.pid);
         wait_for_hid_reappearance(vid, pid, ZMK_USAGE_PAGE, Duration::from_secs(8))
             .map_err(std::io::Error::other)?;
         let hid_device = open_zmk_hid(vid, pid).map_err(|e| {
@@ -30,22 +55,13 @@ impl ZmkProtocol {
                 "Failed to connect HID ({vid:04x}:{pid:04x}) after reappearance: {e}"
             ))
         })?;
-        let (definition, layout_keys, layer_count) = build_from_zmk_data(vid, pid, zmk_data)?;
 
-        Ok(Self {
-            hid_device,
-            definition,
-            layout_keys,
-            layer_count,
-        })
+        Ok(Self { hid_device, layout })
     }
 }
 
 fn open_zmk_hid(vid: u16, pid: u16) -> Result<HidDevice, String> {
     let api = HidApi::new().map_err(|e| format!("hidapi init failed: {e}"))?;
-    // Unlike QMK/Vial, ZMK only needs a plain raw-HID reader here. The VIA helper sends an
-    // eager GetProtocolVersion command on open, but ZMK raw-HID devices can emit async layer/key
-    // notifications without implementing the VIA command/response handshake.
     let path = api
         .device_list()
         .find(|device| {
@@ -95,23 +111,29 @@ fn wait_for_hid_reappearance(
 
 impl KeyboardProtocol for ZmkProtocol {
     fn get_layout_definition(&self) -> &KeyboardDefinition {
-        &self.definition
+        &self.layout.definition
     }
 
     fn get_layer_count(&self) -> Result<usize, Box<dyn Error>> {
-        Ok(self.layer_count)
+        Ok(self.layout.layer_count)
     }
 
     fn read_all_keys(&self, _layers: usize, _rows: usize, _cols: usize) -> LayerKeys3d {
-        self.layout_keys.clone()
+        self.layout.layout_keys.clone()
     }
 
     fn hid_read(&self) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut buffer = vec![0; 32];
         self.hid_device
-            .read(&mut buffer)
+            .read_timeout(&mut buffer, 200)
             .map_err(|e| format!("HID read error: {e}").into())
             .map(|_| buffer)
+    }
+
+    fn reopener(&self) -> Option<Arc<dyn Reopener>> {
+        Some(Arc::new(ZmkReopener {
+            layout: Arc::clone(&self.layout),
+        }))
     }
 }
 

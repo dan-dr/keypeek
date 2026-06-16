@@ -50,6 +50,7 @@ impl OverlayApp {
                 connection: AppConnectionState::Disconnected,
                 ever_connected: false,
                 last_spec: None,
+                reopen: None,
                 connected_definition: None,
                 layout_names: Vec::new(),
                 active_layout_name: String::new(),

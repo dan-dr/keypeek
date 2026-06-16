@@ -9,10 +9,13 @@ pub mod zmk_rpc;
 use crate::layout_key::LayoutKey;
 use qmk_via_api::api::KeyboardApi;
 use std::error::Error;
+use std::sync::Arc;
 
 use self::via::ViaProtocol;
 use self::vial::VialProtocol;
 use self::zmk::ZmkProtocol;
+
+pub use self::zmk_rpc::DeviceLocked;
 
 pub const KEYPEEK_SUBSCRIBE_MARKER: u8 = 0xC0;
 pub const KEYPEEK_SUBSCRIBE_ACTIVE: u8 = 0xA1;
@@ -88,6 +91,14 @@ pub trait KeyboardProtocol: Send {
     fn subscription_sender(&self) -> Option<Box<dyn SubscriptionSender>> {
         None
     }
+
+    fn reopener(&self) -> Option<Arc<dyn Reopener>> {
+        None
+    }
+}
+
+pub trait Reopener: Send + Sync {
+    fn reopen(&self) -> Result<Box<dyn KeyboardProtocol>, Box<dyn Error>>;
 }
 
 pub trait SubscriptionSender: Send {

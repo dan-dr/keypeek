@@ -2,11 +2,20 @@ use super::state::{AppConnectionState, ConnectionDraft, ZmkTransportDraft};
 use super::OverlayApp;
 use crate::connection::{ConnectedState, ConnectionRequest, ConnectionTask};
 use crate::device_discovery::DeviceKind;
-use crate::protocols::{ConnectionSpec, ZmkTransportConfig};
+use crate::protocols::{ConnectionSpec, Reopener, ZmkTransportConfig};
 use eframe::egui;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(3);
+
+fn layout_preference(name: &str) -> Option<String> {
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
 
 impl OverlayApp {
     pub(super) fn select_device(&mut self, index: usize) {
@@ -96,6 +105,7 @@ impl OverlayApp {
         self.session.active_layout_name = connected.selected_layout_name.clone();
         self.session.draft_layout_name = connected.selected_layout_name;
         self.session.connected_definition = Some(connected.definition);
+        self.session.reopen = connected.reopen;
         self.session.connection = AppConnectionState::Connected {
             keyboard: connected.keyboard,
         };
@@ -153,19 +163,32 @@ impl OverlayApp {
         };
 
         self.session.last_spec = Some(spec.clone());
+        self.session.reopen = None;
 
+        let layout_name = layout_preference(&self.session.draft_layout_name);
+        self.spawn_connection(spec, layout_name, None);
+        self.ui.settings_error = None;
+    }
+
+    fn spawn_connection(
+        &mut self,
+        spec: ConnectionSpec,
+        layout_name: Option<String>,
+        reopen: Option<Arc<dyn Reopener>>,
+    ) {
         let request = ConnectionRequest {
             spec,
-            timeout: self.settings.draft.timeout,
-            layout_name: if self.session.draft_layout_name.is_empty() {
-                None
-            } else {
-                Some(self.session.draft_layout_name.clone())
-            },
+            timeout: self.settings.active.timeout,
+            layout_name,
+            reopen,
         };
-
         self.connect.pending_connect = Some(ConnectionTask::start(request, self.ui_wake.clone()));
-        self.ui.settings_error = None;
+    }
+
+    fn schedule_reconnect(&mut self) {
+        self.session.connection = AppConnectionState::Reconnecting {
+            next_attempt_at: Instant::now() + RECONNECT_INTERVAL,
+        };
     }
 
     /// Detects a dropped connection and drives background reconnect attempts, reusing
@@ -200,20 +223,9 @@ impl OverlayApp {
             return;
         };
 
-        let request = ConnectionRequest {
-            spec,
-            timeout: self.settings.active.timeout,
-            layout_name: if self.session.active_layout_name.is_empty() {
-                None
-            } else {
-                Some(self.session.active_layout_name.clone())
-            },
-        };
-        self.connect.pending_connect = Some(ConnectionTask::start(request, self.ui_wake.clone()));
-        // Pre-schedule the next retry; poll_connect_result resets this on failure.
-        self.session.connection = AppConnectionState::Reconnecting {
-            next_attempt_at: now + RECONNECT_INTERVAL,
-        };
+        let layout_name = layout_preference(&self.session.active_layout_name);
+        let reopen = self.session.reopen.clone();
+        self.spawn_connection(spec, layout_name, reopen);
     }
 
     pub(super) fn poll_connect_result(&mut self) {
@@ -233,9 +245,8 @@ impl OverlayApp {
                     self.session.connection,
                     AppConnectionState::Reconnecting { .. }
                 ) {
-                    self.session.connection = AppConnectionState::Reconnecting {
-                        next_attempt_at: Instant::now() + RECONNECT_INTERVAL,
-                    };
+                    eprintln!("Reconnect attempt failed: {e}");
+                    self.schedule_reconnect();
                 } else {
                     self.ui.settings_error = Some(e);
                 }

@@ -130,7 +130,10 @@ impl OverlayApp {
             } else {
                 format!("{}\n{}", shifted, key.tap.full)
             };
-            return (None, Some(create_galley(text, font)));
+            let mut job = egui::text::LayoutJob::default();
+            job.halign = egui::Align::Center;
+            job.append(&text, 0.0, egui::TextFormat::simple(font, color));
+            return (None, Some(ui.painter().layout_job(job)));
         }
 
         if let Some(symbol) = &key.symbol {

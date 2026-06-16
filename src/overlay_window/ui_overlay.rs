@@ -1,4 +1,4 @@
-use super::state::LabelGalleys;
+use super::state::{KeyColors, LabelGalleys};
 use super::OverlayApp;
 use crate::keyboard::Keyboard;
 use crate::layout_key::{BorderStyle, KeycodeKind, LayoutKey};
@@ -369,7 +369,7 @@ impl OverlayApp {
         kind: KeycodeKind,
         desaturate: bool,
         pressed: bool,
-    ) -> (egui::Color32, egui::Color32, f32, egui::Color32) {
+    ) -> KeyColors {
         const DESATURATE_FACTOR: f32 = 0.7;
 
         const BLACK: egui::Color32 = egui::Color32::BLACK;
@@ -380,12 +380,12 @@ impl OverlayApp {
         let mut font_color = Self::to_egui_color(self.settings.active.theme.font_color);
 
         if pressed {
-            return (
-                background_color.lerp_to_gamma(egui::Color32::WHITE, 0.2),
-                background_color.lerp_to_gamma(egui::Color32::WHITE, 0.7),
-                0.03 * size,
-                font_color.lerp_to_gamma(egui::Color32::WHITE, 0.4),
-            );
+            return KeyColors {
+                fill: background_color.lerp_to_gamma(egui::Color32::WHITE, 0.2),
+                border: background_color.lerp_to_gamma(egui::Color32::WHITE, 0.7),
+                border_thickness: 0.03 * size,
+                font: font_color.lerp_to_gamma(egui::Color32::WHITE, 0.4),
+            };
         }
 
         if kind == KeycodeKind::Special {
@@ -402,7 +402,12 @@ impl OverlayApp {
             font_color = font_color.gamma_multiply(1.0 - DESATURATE_FACTOR);
         }
 
-        (background_color, border_color, 1.0, font_color)
+        KeyColors {
+            fill: background_color,
+            border: border_color,
+            border_thickness: 1.0,
+            font: font_color,
+        }
     }
 
     pub(super) fn to_egui_color(color: ThemeColor) -> egui::Color32 {
@@ -464,13 +469,17 @@ impl OverlayApp {
                         .unwrap_or(KeycodeKind::Basic);
 
                     let pressed = keyboard.is_key_pressed(key.row, key.col);
-                    let (fill_color, stroke_color, border_thickness, font_color) = self
-                        .get_keycode_color(
-                            layout_key.layer_ref.unwrap_or(effective_layer),
-                            first_layer_key_kind,
-                            is_background_key,
-                            pressed,
-                        );
+                    let KeyColors {
+                        fill: fill_color,
+                        border: stroke_color,
+                        border_thickness,
+                        font: font_color,
+                    } = self.get_keycode_color(
+                        layout_key.layer_ref.unwrap_or(effective_layer),
+                        first_layer_key_kind,
+                        is_background_key,
+                        pressed,
+                    );
 
                     let rect = egui::Rect::from_min_size(
                         egui::pos2(key.x * size, key.y * size) + window_pos.to_vec2(),
@@ -560,6 +569,10 @@ impl OverlayApp {
                         );
                     }
 
+                    let draw_text = |pos, galley| {
+                        ui.painter()
+                            .add(rotated_text_shape(pos, galley, font_color, center, angle));
+                    };
                     match (galleys.symbol, galleys.text) {
                         (Some(symbol_galley), Some(text_galley)) => {
                             let gap = 0.06 * size;
@@ -572,40 +585,16 @@ impl OverlayApp {
                                 egui::pos2(text_pos_x, center.y - text_galley.rect.center().y);
                             let sym_pos =
                                 egui::pos2(start_x, center.y - symbol_galley.rect.center().y);
-                            ui.painter().add(rotated_text_shape(
-                                sym_pos,
-                                symbol_galley,
-                                font_color,
-                                center,
-                                angle,
-                            ));
-                            ui.painter().add(rotated_text_shape(
-                                text_pos,
-                                text_galley,
-                                font_color,
-                                center,
-                                angle,
-                            ));
+                            draw_text(sym_pos, symbol_galley);
+                            draw_text(text_pos, text_galley);
                         }
                         (Some(symbol_galley), None) => {
                             let sym_pos = center - symbol_galley.rect.center().to_vec2();
-                            ui.painter().add(rotated_text_shape(
-                                sym_pos,
-                                symbol_galley,
-                                font_color,
-                                center,
-                                angle,
-                            ));
+                            draw_text(sym_pos, symbol_galley);
                         }
                         (None, Some(text_galley)) => {
                             let label_pos = center - text_galley.rect.center().to_vec2();
-                            ui.painter().add(rotated_text_shape(
-                                label_pos,
-                                text_galley,
-                                font_color,
-                                center,
-                                angle,
-                            ));
+                            draw_text(label_pos, text_galley);
                         }
                         _ => {}
                     }

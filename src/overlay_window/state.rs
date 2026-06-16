@@ -16,6 +16,14 @@ pub struct LabelGalleys {
     pub argument: Option<std::sync::Arc<egui::Galley>>,
 }
 
+/// Resolved colors for painting a single key, derived from its layer, kind, and state.
+pub struct KeyColors {
+    pub fill: egui::Color32,
+    pub border: egui::Color32,
+    pub border_thickness: f32,
+    pub font: egui::Color32,
+}
+
 pub enum AppConnectionState {
     Disconnected,
     Connected { keyboard: Keyboard },

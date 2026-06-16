@@ -6,29 +6,12 @@ use std::time::Instant;
 
 impl OverlayApp {
     pub(super) fn apply_live_visual_settings(&mut self) {
-        let old_timeout = self.settings.active.timeout;
-        let changed = self.settings.active.size != self.settings.draft.size
-            || self.settings.active.font_size_multiplier
-                != self.settings.draft.font_size_multiplier
-            || self.settings.active.auto_fit_before_ellipsis
-                != self.settings.draft.auto_fit_before_ellipsis
-            || self.settings.active.margin != self.settings.draft.margin
-            || self.settings.active.position != self.settings.draft.position
-            || self.settings.active.timeout != self.settings.draft.timeout
-            || self.settings.active.theme != self.settings.draft.theme;
-
-        if !changed {
+        if self.settings.active == self.settings.draft {
             return;
         }
 
-        self.settings.active.size = self.settings.draft.size;
-        self.settings.active.font_size_multiplier = self.settings.draft.font_size_multiplier;
-        self.settings.active.auto_fit_before_ellipsis =
-            self.settings.draft.auto_fit_before_ellipsis;
-        self.settings.active.margin = self.settings.draft.margin;
-        self.settings.active.position = self.settings.draft.position;
-        self.settings.active.timeout = self.settings.draft.timeout;
-        self.settings.active.theme = self.settings.draft.theme.clone();
+        let old_timeout = self.settings.active.timeout;
+        self.settings.active = self.settings.draft.clone();
 
         if let AppConnectionState::Connected { keyboard } = &self.session.connection {
             if old_timeout != self.settings.active.timeout {

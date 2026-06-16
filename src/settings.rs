@@ -163,7 +163,7 @@ impl Default for ThemeSettings {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Settings {
     pub size: i32,
     pub font_size_multiplier: f32,

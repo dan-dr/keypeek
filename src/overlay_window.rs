@@ -77,6 +77,24 @@ impl OverlayApp {
         self.ui.mouse_passthrough = Some(mouse_passthrough);
     }
 
+    /// Draw a centered modal with `message` and an OK button that clears `slot`.
+    fn message_window(ctx: &egui::Context, title: &str, slot: &mut Option<String>) {
+        let Some(message) = slot.clone() else {
+            return;
+        };
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(message);
+                ui.add_space(10.0);
+                if ui.button("OK").clicked() {
+                    *slot = None;
+                }
+            });
+    }
+
     fn schedule_overlay_hide_repaint(&self, ctx: &egui::Context) {
         if self.ui.settings_visible {
             return;
@@ -148,33 +166,8 @@ impl eframe::App for OverlayApp {
             self.draw_settings_window(ctx);
         }
 
-        if let Some(error_message) = self.ui.settings_error.clone() {
-            egui::Window::new("Error")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.label(error_message);
-                    ui.add_space(10.0);
-                    if ui.button("OK").clicked() {
-                        self.ui.settings_error = None;
-                    }
-                });
-        }
-
-        if let Some(warning_message) = self.ui.settings_warning.clone() {
-            egui::Window::new("Notice")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.label(warning_message);
-                    ui.add_space(10.0);
-                    if ui.button("OK").clicked() {
-                        self.ui.settings_warning = None;
-                    }
-                });
-        }
+        Self::message_window(ctx, "Error", &mut self.ui.settings_error);
+        Self::message_window(ctx, "Notice", &mut self.ui.settings_warning);
 
         self.schedule_overlay_hide_repaint(ctx);
     }

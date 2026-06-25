@@ -83,6 +83,10 @@
           pkg-config
 
           libxcb
+
+          wayland
+          libGL
+          libxkbcommon
         ];
 
         # Additional environment variables can be set directly

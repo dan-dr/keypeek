@@ -89,15 +89,29 @@ fn wait_for_hid_reappearance(
     // On Linux BLE, the HID node can temporarily disappear while HoG/GATT activity settles; wait
     // for the matching HID interface to reappear before reconnecting via hidapi.
     let deadline = Instant::now() + timeout;
+    let mut device_present_without_usage = false;
     while Instant::now() < deadline {
         let api = HidApi::new().map_err(|e| format!("hidapi init failed: {e}"))?;
-        let present = api
-            .device_list()
-            .any(|d| d.vendor_id() == vid && d.product_id() == pid && d.usage_page() == usage_page);
-        if present {
+        let mut matched = false;
+        for d in api.device_list() {
+            if d.vendor_id() == vid && d.product_id() == pid {
+                if d.usage_page() == usage_page {
+                    matched = true;
+                    break;
+                }
+                device_present_without_usage = true;
+            }
+        }
+        if matched {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(150));
+    }
+
+    if device_present_without_usage {
+        return Err(format!(
+            "Please re-pair the keyboard to refresh the HID descriptor."
+        ));
     }
 
     Err(format!(

@@ -21,10 +21,15 @@ impl OverlayHost for EframeHost<'_> {
 
 struct EframeApp {
     app: OverlayApp,
-    // macOS won't honor `with_maximized` for an undecorated transparent window, so
-    // we size it to the monitor on the first frame.
-    #[cfg(target_os = "macos")]
-    macos_maximized: bool,
+    // Undecorated transparent windows don't reliably honor `with_maximized`, so we
+    // size to the monitor explicitly once known. Linux never WM-maximizes at all,
+    // since Mutter drops always-on-top on a maximized window.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    sized_to_monitor: bool,
+    // winit's always-on-top request is sent before the window is mapped, which
+    // EWMH WMs like Mutter ignore, so re-assert it for a few frames after mapping.
+    #[cfg(target_os = "linux")]
+    x11_above_ticks: u32,
 }
 
 impl eframe::App for EframeApp {
@@ -35,12 +40,23 @@ impl eframe::App for EframeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        #[cfg(target_os = "macos")]
-        if !self.macos_maximized {
+        // Re-assert always-on-top now that the window is mapped (see field docs).
+        #[cfg(target_os = "linux")]
+        if self.x11_above_ticks > 0 {
+            self.x11_above_ticks -= 1;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                egui::WindowLevel::AlwaysOnTop,
+            ));
+            ctx.request_repaint();
+        }
+
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if !self.sized_to_monitor {
             if let Some(monitor_size) = ctx.input(|i| i.viewport().monitor_size) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(0.0, 0.0)));
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(monitor_size));
-                self.macos_maximized = true;
+                self.sized_to_monitor = true;
             }
         }
 
@@ -49,8 +65,35 @@ impl eframe::App for EframeApp {
     }
 }
 
-pub fn run(settings: Settings, devices: Vec<DiscoveredDevice>) -> Result<(), eframe::Error> {
-    let options = eframe::NativeOptions {
+// `force_x11` (Linux only) makes winit use XWayland instead of native Wayland,
+// since Mutter honors always-on-top for XWayland clients but not native ones.
+pub fn run(
+    settings: Settings,
+    devices: Vec<DiscoveredDevice>,
+    force_x11: bool,
+) -> Result<(), eframe::Error> {
+    #[cfg(target_os = "linux")]
+    if force_x11 {
+        match run_inner(settings.clone(), devices.clone(), true) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!(
+                    "KeyPeek: XWayland/X11 backend unavailable ({e}); \
+                     retrying on Wayland (overlay will not stay always-on-top)."
+                );
+            }
+        }
+    }
+    run_inner(settings, devices, false)
+}
+
+fn run_inner(
+    settings: Settings,
+    devices: Vec<DiscoveredDevice>,
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] force_x11: bool,
+) -> Result<(), eframe::Error> {
+    #[allow(unused_mut)]
+    let mut options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow, // Glow is required for a transparent background (https://github.com/emilk/egui/issues/4451)
         viewport: egui::ViewportBuilder::default()
             .with_decorations(false)
@@ -59,14 +102,26 @@ pub fn run(settings: Settings, devices: Vec<DiscoveredDevice>) -> Result<(), efr
             .with_transparent(true)
             .with_has_shadow(false)
             .with_always_on_top(),
-        // Hide from the macOS dock so the app only appears as a tray icon.
-        #[cfg(target_os = "macos")]
-        event_loop_builder: Some(Box::new(|builder| {
-            use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
-            builder.with_activation_policy(ActivationPolicy::Accessory);
-        })),
         ..Default::default()
     };
+
+    // Hide from the macOS dock so the app only appears as a tray icon.
+    #[cfg(target_os = "macos")]
+    {
+        options.event_loop_builder = Some(Box::new(|builder| {
+            use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+            builder.with_activation_policy(ActivationPolicy::Accessory);
+        }));
+    }
+
+    // Force XWayland so always-on-top is honored on GNOME (see `run`).
+    #[cfg(target_os = "linux")]
+    if force_x11 {
+        options.event_loop_builder = Some(Box::new(|builder| {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            builder.with_x11();
+        }));
+    }
 
     eframe::run_native(
         "KeyPeek",
@@ -82,8 +137,10 @@ pub fn run(settings: Settings, devices: Vec<DiscoveredDevice>) -> Result<(), efr
             let app = OverlayApp::new(tray_icon, UiWake::from_ctx(&cc.egui_ctx), settings, devices);
             Ok(Box::new(EframeApp {
                 app,
-                #[cfg(target_os = "macos")]
-                macos_maximized: false,
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                sized_to_monitor: false,
+                #[cfg(target_os = "linux")]
+                x11_above_ticks: 10,
             }))
         }),
     )

@@ -8,6 +8,13 @@ mod input;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use smithay_client_toolkit::reexports::protocols::wp::{
+    fractional_scale::v1::client::{
+        wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+        wp_fractional_scale_v1::{self, WpFractionalScaleV1},
+    },
+    viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
@@ -31,12 +38,13 @@ use smithay_client_toolkit::{
     },
 };
 use wayland_client::{
+    delegate_noop,
     globals::registry_queue_init,
     protocol::{
         wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_seat::WlSeat,
         wl_surface::WlSurface,
     },
-    Connection, QueueHandle,
+    Connection, Dispatch, QueueHandle,
 };
 
 use egui_glow::glow;
@@ -75,6 +83,9 @@ struct WaylandApp {
     compositor_state: CompositorState,
 
     layer: LayerSurface,
+    /// Maps the buffer to the logical surface size under fractional scaling;
+    /// `None` when the compositor lacks wp-fractional-scale/wp-viewporter.
+    viewport: Option<WpViewport>,
     keyboard: Option<WlKeyboard>,
     pointer: Option<WlPointer>,
 
@@ -86,10 +97,10 @@ struct WaylandApp {
     painter: Option<egui_glow::Painter>,
     gl: Option<Arc<glow::Context>>,
 
-    /// Surface size in logical points and the integer buffer scale.
+    /// Surface size in logical points and the (possibly fractional) scale.
     width: i32,
     height: i32,
-    scale: i32,
+    scale: f64,
 
     configured: bool,
     needs_redraw: bool,
@@ -117,6 +128,22 @@ pub fn run(
     layer.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
     layer.set_size(0, 0); // 0,0 + all-edge anchors => compositor sizes it to the output
     layer.commit();
+
+    // Fractional scaling needs both protocols: the scale event and a viewport to
+    // map the scaled buffer back to the logical size. Otherwise integer scale.
+    let viewporter = globals
+        .bind::<WpViewporter, WaylandApp, _>(&qh, 1..=1, ())
+        .ok();
+    let fractional_manager = globals
+        .bind::<WpFractionalScaleManagerV1, WaylandApp, _>(&qh, 1..=1, ())
+        .ok();
+    let viewport = match (&viewporter, &fractional_manager) {
+        (Some(viewporter), Some(manager)) => {
+            manager.get_fractional_scale(layer.wl_surface(), &qh, ());
+            Some(viewporter.get_viewport(layer.wl_surface(), &qh, ()))
+        }
+        _ => None,
+    };
 
     // calloop loop, plus a ping the worker threads use to request repaints.
     let mut event_loop: EventLoop<WaylandApp> = EventLoop::try_new()?;
@@ -148,6 +175,7 @@ pub fn run(
         seat_state: SeatState::new(&globals, &qh),
         compositor_state,
         layer,
+        viewport,
         keyboard: None,
         pointer: None,
         egui_ctx,
@@ -158,7 +186,7 @@ pub fn run(
         gl: None,
         width: 0,
         height: 0,
-        scale: 1,
+        scale: 1.0,
         configured: false,
         needs_redraw: false,
         exit: false,
@@ -187,15 +215,21 @@ pub fn run(
 impl WaylandApp {
     fn size_px(&self) -> [u32; 2] {
         [
-            (self.width * self.scale).max(1) as u32,
-            (self.height * self.scale).max(1) as u32,
+            (self.width as f64 * self.scale).round().max(1.0) as u32,
+            (self.height as f64 * self.scale).round().max(1.0) as u32,
         ]
     }
 
     /// (Re)create the EGL context + egui_glow painter for the current surface size.
     fn init_or_resize_gl(&mut self, conn: &Connection) {
         let [w, h] = self.size_px();
-        self.layer.wl_surface().set_buffer_scale(self.scale);
+        if let Some(viewport) = &self.viewport {
+            // Buffer scale stays 1; the viewport maps the scaled buffer to the
+            // logical surface size.
+            viewport.set_destination(self.width.max(1), self.height.max(1));
+        } else {
+            self.layer.wl_surface().set_buffer_scale(self.scale as i32);
+        }
 
         // Already initialized: just resize the EGL window.
         if let Some(egl) = self.egl.as_ref() {
@@ -231,9 +265,7 @@ impl WaylandApp {
         }
 
         self.egui_ctx.set_pixels_per_point(self.scale as f32);
-        let raw_input = self
-            .input
-            .take_raw_input((self.width, self.height), self.scale as f32);
+        let raw_input = self.input.take_raw_input((self.width, self.height));
 
         let ctx = self.egui_ctx.clone();
         let mut host = WaylandHost::default();
@@ -306,7 +338,12 @@ impl CompositorHandler for WaylandApp {
         _surface: &WlSurface,
         new_factor: i32,
     ) {
-        if new_factor != self.scale && new_factor > 0 {
+        // With fractional scaling active, the wp-fractional-scale event is authoritative.
+        if self.viewport.is_some() {
+            return;
+        }
+        let new_factor = new_factor as f64;
+        if new_factor != self.scale && new_factor > 0.0 {
             self.scale = new_factor;
             if self.configured {
                 self.init_or_resize_gl(conn);
@@ -552,6 +589,33 @@ impl OutputHandler for WaylandApp {
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlOutput) {}
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlOutput) {}
 }
+
+impl Dispatch<WpFractionalScaleV1, ()> for WaylandApp {
+    fn event(
+        state: &mut Self,
+        _: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &(),
+        conn: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // The compositor reports the preferred scale in 120ths.
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            let new_scale = scale as f64 / 120.0;
+            if new_scale > 0.0 && new_scale != state.scale {
+                state.scale = new_scale;
+                if state.configured {
+                    state.init_or_resize_gl(conn);
+                    state.needs_redraw = true;
+                }
+            }
+        }
+    }
+}
+
+delegate_noop!(WaylandApp: ignore WpFractionalScaleManagerV1);
+delegate_noop!(WaylandApp: ignore WpViewporter);
+delegate_noop!(WaylandApp: ignore WpViewport);
 
 impl ProvidesRegistryState for WaylandApp {
     fn registry(&mut self) -> &mut RegistryState {

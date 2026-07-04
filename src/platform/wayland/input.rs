@@ -74,10 +74,9 @@ impl InputState {
 
     /// Drain accumulated events into a fresh `RawInput`.
     ///
-    /// `size_px` is the surface size in physical pixels; `scale` is points-per-pixel
-    /// (so the screen rect is reported in egui points).
-    pub fn take_raw_input(&mut self, size_px: (i32, i32), scale: f32) -> egui::RawInput {
-        let size_pts = egui::vec2(size_px.0 as f32 / scale, size_px.1 as f32 / scale);
+    /// `size_pts` is the logical surface size, which is already in egui points.
+    pub fn take_raw_input(&mut self, size_pts: (i32, i32)) -> egui::RawInput {
+        let size_pts = egui::vec2(size_pts.0 as f32, size_pts.1 as f32);
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size_pts)),
             modifiers: self.modifiers,

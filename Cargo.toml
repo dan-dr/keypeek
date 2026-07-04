@@ -5,7 +5,7 @@ description = "Keyboard layer overlay for VIA, Vial, and ZMK"
 authors = ["Stephan Rumswinkel"]
 repository = "https://github.com/srwi/keypeek"
 readme = "README.md"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 
 [dependencies]
@@ -30,9 +30,9 @@ zmk-studio-api = { git = "https://github.com/srwi/zmk-studio-api", features = ["
 gtk = "0.18"
 winit = { version = "0.30.13", features = ["x11"] }
 egui_glow = "0.34.3"
-smithay-client-toolkit = "0.19.2"
-wayland-client = "0.31"
-wayland-egl = "0.32"
+smithay-client-toolkit = "0.20.0"
+wayland-client = "0.31.14"
+wayland-egl = "0.32.11"
 khronos-egl = { version = "6", features = ["static"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

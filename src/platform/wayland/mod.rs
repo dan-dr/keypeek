@@ -193,10 +193,17 @@ pub fn run(
         repaint_at: None,
     };
 
-    // ~60 Hz wakeups let scheduled repaints fire.
-    let tick = Duration::from_millis(16);
     while !state.exit {
-        event_loop.dispatch(Some(tick), &mut state)?;
+        // Sleep until the next scheduled repaint; wake immediately when a redraw is
+        // already pending, and block indefinitely (until an event) when idle.
+        let timeout = if state.needs_redraw && state.configured {
+            Some(Duration::ZERO)
+        } else {
+            state
+                .repaint_at
+                .map(|at| at.saturating_duration_since(Instant::now()))
+        };
+        event_loop.dispatch(timeout, &mut state)?;
 
         if let Some(at) = state.repaint_at {
             if Instant::now() >= at {

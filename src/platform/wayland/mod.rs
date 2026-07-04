@@ -138,7 +138,6 @@ pub fn run(
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     egui_ctx.set_fonts(fonts);
 
-    // The tray runs on this thread's gtk context; we pump it from the loop below.
     let tray_icon = crate::tray::create_tray_icon();
     let ui_wake = UiWake::new(Arc::new(move || ping.ping()));
     let app = OverlayApp::new(tray_icon, ui_wake, settings, devices);
@@ -166,11 +165,10 @@ pub fn run(
         repaint_at: None,
     };
 
-    // ~60 Hz wakeups keep the gtk tray responsive and let scheduled repaints fire.
+    // ~60 Hz wakeups let scheduled repaints fire.
     let tick = Duration::from_millis(16);
     while !state.exit {
         event_loop.dispatch(Some(tick), &mut state)?;
-        pump_gtk();
 
         if let Some(at) = state.repaint_at {
             if Instant::now() >= at {
@@ -184,12 +182,6 @@ pub fn run(
     }
 
     Ok(())
-}
-
-fn pump_gtk() {
-    while gtk::events_pending() {
-        gtk::main_iteration_do(false);
-    }
 }
 
 impl WaylandApp {

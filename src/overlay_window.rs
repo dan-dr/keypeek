@@ -15,7 +15,7 @@ use state::{
 };
 
 pub struct OverlayApp {
-    _tray_icon: tray_icon::TrayIcon,
+    _tray: crate::tray::Tray,
     ui_wake: UiWake,
     ui: UiState,
     settings: SettingsState,
@@ -25,13 +25,13 @@ pub struct OverlayApp {
 
 impl OverlayApp {
     pub fn new(
-        tray_icon: tray_icon::TrayIcon,
+        tray: crate::tray::Tray,
         ui_wake: UiWake,
         base_settings: Settings,
         available_devices: Vec<DiscoveredDevice>,
     ) -> Self {
         Self {
-            _tray_icon: tray_icon,
+            _tray: tray,
             ui_wake,
             ui: UiState {
                 settings_visible: true,

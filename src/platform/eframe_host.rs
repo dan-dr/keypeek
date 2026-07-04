@@ -93,15 +93,23 @@ fn run_inner(
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] force_x11: bool,
 ) -> Result<(), eframe::Error> {
     #[allow(unused_mut)]
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_decorations(false)
+        .with_taskbar(false)
+        .with_maximized(true)
+        .with_transparent(true)
+        .with_has_shadow(false)
+        .with_always_on_top();
+
+    #[cfg(target_os = "linux")]
+    {
+        viewport = viewport.with_window_type(egui::X11WindowType::Utility);
+    }
+
+    #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow, // Glow is required for a transparent background (https://github.com/emilk/egui/issues/4451)
-        viewport: egui::ViewportBuilder::default()
-            .with_decorations(false)
-            .with_taskbar(false)
-            .with_maximized(true)
-            .with_transparent(true)
-            .with_has_shadow(false)
-            .with_always_on_top(),
+        viewport,
         ..Default::default()
     };
 

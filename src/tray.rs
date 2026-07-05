@@ -32,7 +32,13 @@ fn icon_bytes() -> &'static [u8] {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+// Monochrome template image; macOS tints it to match the menu bar.
+#[cfg(target_os = "macos")]
+fn icon_bytes() -> &'static [u8] {
+    include_bytes!("../resources/tray-icon-template.png")
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn icon_bytes() -> &'static [u8] {
     include_bytes!("../resources/icon.ico")
 }
@@ -63,6 +69,9 @@ fn build_tray_icon() -> TrayIcon {
     // Left click opens the settings instead (see `create_tray_icon`).
     #[cfg(target_os = "windows")]
     let builder = builder.with_menu_on_left_click(false);
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_icon_as_template(true);
 
     builder.build().unwrap()
 }

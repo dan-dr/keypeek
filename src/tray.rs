@@ -17,10 +17,28 @@ pub struct Tray {
     _icon: TrayIcon,
 }
 
-fn create_icon() -> Icon {
-    const ICON_BYTES: &[u8] = include_bytes!("../resources/icon.ico");
+// Windows convention is a monochrome glyph matching the taskbar theme.
+#[cfg(target_os = "windows")]
+fn icon_bytes() -> &'static [u8] {
+    let light_theme = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .map(|value| value != 0)
+        .unwrap_or(false);
+    if light_theme {
+        include_bytes!("../resources/tray-icon-black.png")
+    } else {
+        include_bytes!("../resources/tray-icon-white.png")
+    }
+}
 
-    let icon = load_from_memory(ICON_BYTES)
+#[cfg(not(target_os = "windows"))]
+fn icon_bytes() -> &'static [u8] {
+    include_bytes!("../resources/icon.ico")
+}
+
+fn create_icon() -> Icon {
+    let icon = load_from_memory(icon_bytes())
         .expect("Failed to load icon.")
         .into_rgba8();
 

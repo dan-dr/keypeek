@@ -41,6 +41,7 @@ winit = "0.30.13"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Devices_Bluetooth", "Devices_Radios", "Foundation"] }
+winreg = "0.55"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1"

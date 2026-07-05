@@ -67,6 +67,26 @@ impl eframe::App for EframeApp {
     }
 }
 
+// Keep the overlay visible when switching Spaces or using fullscreen apps.
+#[cfg(target_os = "macos")]
+fn show_on_all_spaces(cc: &eframe::CreationContext<'_>) {
+    use objc2_app_kit::{NSView, NSWindowCollectionBehavior};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = cc.window_handle() else {
+        return;
+    };
+    if let RawWindowHandle::AppKit(handle) = handle.as_raw() {
+        let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+        if let Some(window) = view.window() {
+            window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
+        }
+    }
+}
+
 // `force_x11` (Linux only) makes winit use XWayland instead of native Wayland,
 // since Mutter honors always-on-top for XWayland clients but not native ones.
 pub fn run(
@@ -137,6 +157,9 @@ fn run_inner(
         "KeyPeek",
         options,
         Box::new(move |cc| {
+            #[cfg(target_os = "macos")]
+            show_on_all_spaces(cc);
+
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
             let ui_wake = UiWake::from_ctx(&cc.egui_ctx);

@@ -38,6 +38,8 @@ khronos-egl = { version = "6", features = ["static"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30.13"
+objc2-app-kit = { version = "0.3", features = ["NSResponder", "NSView", "NSWindow"] }
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Devices_Bluetooth", "Devices_Radios", "Foundation"] }

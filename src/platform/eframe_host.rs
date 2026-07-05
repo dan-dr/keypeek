@@ -3,6 +3,8 @@ use crate::device_discovery::DiscoveredDevice;
 use crate::overlay_window::OverlayApp;
 use crate::settings::Settings;
 use crate::ui_wake::UiWake;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 struct EframeHost<'a> {
     ctx: &'a egui::Context,
@@ -136,13 +138,23 @@ fn run_inner(
         options,
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            let tray_icon = crate::tray::create_tray_icon();
+
+            let ui_wake = UiWake::from_ctx(&cc.egui_ctx);
+            let settings_requested = Arc::new(AtomicBool::new(false));
+            let tray_icon = crate::tray::create_tray_icon({
+                let settings_requested = settings_requested.clone();
+                let ui_wake = ui_wake.clone();
+                Arc::new(move || {
+                    settings_requested.store(true, Ordering::Relaxed);
+                    ui_wake.request_repaint();
+                })
+            });
 
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
 
-            let app = OverlayApp::new(tray_icon, UiWake::from_ctx(&cc.egui_ctx), settings, devices);
+            let app = OverlayApp::new(tray_icon, settings_requested, ui_wake, settings, devices);
             Ok(Box::new(EframeApp {
                 app,
                 #[cfg(any(target_os = "macos", target_os = "linux"))]

@@ -1,7 +1,11 @@
 use image::load_from_memory;
 use std::process;
+use std::sync::Arc;
 use std::thread;
-use tray_icon::{menu::Menu, menu::MenuEvent, menu::MenuItem, Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::{
+    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+    Icon, TrayIcon, TrayIconBuilder,
+};
 
 /// Keeps the tray icon alive for the lifetime of the app.
 ///
@@ -25,22 +29,53 @@ fn create_icon() -> Icon {
 }
 
 fn build_tray_icon() -> TrayIcon {
-    let quit = MenuItem::new("Quit", true, None);
     let menu = Menu::new();
-    menu.append(&quit).expect("Failed to append menu item.");
+    menu.append_items(&[
+        &MenuItem::with_id("settings", "Settings…", true, None),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id("quit", "Quit", true, None),
+    ])
+    .expect("Failed to append menu items.");
 
-    TrayIconBuilder::new()
+    let builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_icon(create_icon())
-        .with_tooltip("KeyPeek")
-        .build()
-        .unwrap()
+        .with_tooltip("KeyPeek");
+
+    // Left click opens the settings instead (see `create_tray_icon`).
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_menu_on_left_click(false);
+
+    builder.build().unwrap()
 }
 
-pub fn create_tray_icon() -> Tray {
+pub fn create_tray_icon(on_settings: Arc<dyn Fn() + Send + Sync>) -> Tray {
+    thread::spawn({
+        let on_settings = on_settings.clone();
+        move || {
+            while let Ok(event) = MenuEvent::receiver().recv() {
+                match event.id.0.as_str() {
+                    "settings" => on_settings(),
+                    "quit" => process::exit(0),
+                    _ => {}
+                }
+            }
+        }
+    });
+
+    // Left-clicking the icon opens the settings, as is conventional on Windows.
+    #[cfg(target_os = "windows")]
     thread::spawn(move || {
-        if MenuEvent::receiver().recv().is_ok() {
-            process::exit(0);
+        use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+        while let Ok(event) = TrayIconEvent::receiver().recv() {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                on_settings();
+            }
         }
     });
 

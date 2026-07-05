@@ -3,6 +3,8 @@ use crate::platform::OverlayHost;
 use crate::settings::Settings;
 use crate::ui_wake::UiWake;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 mod connection_flow;
@@ -16,6 +18,7 @@ use state::{
 
 pub struct OverlayApp {
     _tray: crate::tray::Tray,
+    settings_requested: Arc<AtomicBool>,
     ui_wake: UiWake,
     ui: UiState,
     settings: SettingsState,
@@ -26,12 +29,14 @@ pub struct OverlayApp {
 impl OverlayApp {
     pub fn new(
         tray: crate::tray::Tray,
+        settings_requested: Arc<AtomicBool>,
         ui_wake: UiWake,
         base_settings: Settings,
         available_devices: Vec<DiscoveredDevice>,
     ) -> Self {
         Self {
             _tray: tray,
+            settings_requested,
             ui_wake,
             ui: UiState {
                 settings_visible: true,
@@ -130,6 +135,10 @@ impl OverlayApp {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context, host: &mut dyn OverlayHost) {
+        if self.settings_requested.swap(false, Ordering::Relaxed) {
+            self.ui.settings_visible = true;
+        }
+
         self.poll_connect_result();
         self.maintain_connection(ctx);
         self.apply_live_visual_settings();

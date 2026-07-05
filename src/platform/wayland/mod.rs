@@ -5,6 +5,7 @@
 mod egl;
 mod input;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -165,9 +166,17 @@ pub fn run(
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     egui_ctx.set_fonts(fonts);
 
-    let tray_icon = crate::tray::create_tray_icon();
     let ui_wake = UiWake::new(Arc::new(move || ping.ping()));
-    let app = OverlayApp::new(tray_icon, ui_wake, settings, devices);
+    let settings_requested = Arc::new(AtomicBool::new(false));
+    let tray_icon = crate::tray::create_tray_icon({
+        let settings_requested = settings_requested.clone();
+        let ui_wake = ui_wake.clone();
+        Arc::new(move || {
+            settings_requested.store(true, Ordering::Relaxed);
+            ui_wake.request_repaint();
+        })
+    });
+    let app = OverlayApp::new(tray_icon, settings_requested, ui_wake, settings, devices);
 
     let mut state = WaylandApp {
         registry_state: RegistryState::new(&globals),

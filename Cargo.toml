@@ -42,6 +42,9 @@ winit = "0.30.13"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Devices_Bluetooth", "Devices_Radios", "Foundation"] }
 
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"
+
 [package.metadata.bundle]
 name = "KeyPeek"
 identifier = "dev.srwi.keypeek"

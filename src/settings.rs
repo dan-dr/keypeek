@@ -1,6 +1,8 @@
+use directories::ProjectDirs;
 use ini::Ini;
 use std::fmt;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -189,30 +191,21 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub fn config_file_path() -> PathBuf {
-        Self::config_dir().join("settings.ini")
+    pub fn config_file_path() -> Option<PathBuf> {
+        Self::project_dirs().map(|dirs| dirs.config_dir().join("settings.ini"))
     }
 
-    fn config_dir() -> PathBuf {
-        let mut path = dirs::config_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-        path.push(Self::app_config_dir_name());
-        path
-    }
-
-    #[cfg(target_os = "linux")]
-    fn app_config_dir_name() -> &'static str {
-        "keypeek"
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn app_config_dir_name() -> &'static str {
-        "KeyPeek"
+    fn project_dirs() -> Option<ProjectDirs> {
+        ProjectDirs::from("dev", "srwi", "KeyPeek")
     }
 
     pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::config_file_path();
+        let path = Self::config_file_path().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "could not determine the KeyPeek config directory",
+            )
+        })?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -220,8 +213,9 @@ impl Settings {
     }
 
     pub fn load() -> Option<Self> {
-        let path = Self::config_file_path();
-        Self::load_from_file(&path).or_else(|| Self::load_from_file("settings.ini"))
+        Self::config_file_path()
+            .and_then(Self::load_from_file)
+            .or_else(|| Self::load_from_file("settings.ini"))
     }
 
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> std::io::Result<()> {

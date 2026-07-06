@@ -17,12 +17,6 @@ use device_discovery::discover_devices;
 use settings::Settings;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let instance = single_instance::SingleInstance::new("keypeek")?;
-    if !instance.is_single() {
-        eprintln!("KeyPeek is already running.");
-        return Ok(());
-    }
-
     let settings = Settings::load().unwrap_or_default();
     let available_devices = discover_devices();
     platform::run(settings, available_devices)

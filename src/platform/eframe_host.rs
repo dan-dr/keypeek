@@ -67,7 +67,8 @@ impl eframe::App for EframeApp {
     }
 }
 
-// Keep the overlay visible when switching Spaces or using fullscreen apps.
+// Keep the overlay visible across Spaces and fullscreen apps without treating it
+// as a user-switchable window.
 #[cfg(target_os = "macos")]
 fn show_on_all_spaces(cc: &eframe::CreationContext<'_>) {
     use objc2_app_kit::{NSView, NSWindowCollectionBehavior};
@@ -81,7 +82,8 @@ fn show_on_all_spaces(cc: &eframe::CreationContext<'_>) {
         if let Some(window) = view.window() {
             window.setCollectionBehavior(
                 NSWindowCollectionBehavior::CanJoinAllSpaces
-                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary
+                    | NSWindowCollectionBehavior::IgnoresCycle,
             );
         }
     }

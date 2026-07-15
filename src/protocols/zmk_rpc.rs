@@ -12,6 +12,7 @@ pub struct ZmkSerialDevice {
     pub vid: u16,
     pub pid: u16,
     pub product: Option<String>,
+    pub serial_number: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub fn scan_serial_ports() -> Vec<ZmkSerialDevice> {
                     vid: usb.vid,
                     pid: usb.pid,
                     product: usb.product.clone(),
+                    serial_number: usb.serial_number.clone(),
                 })
             } else {
                 None

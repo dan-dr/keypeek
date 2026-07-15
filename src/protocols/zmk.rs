@@ -14,6 +14,7 @@ struct ZmkLayout {
     definition: KeyboardDefinition,
     layout_keys: LayerKeys3d,
     layer_count: usize,
+    hid_serial_number: Option<String>,
 }
 
 pub struct ZmkProtocol {
@@ -36,6 +37,7 @@ impl ZmkProtocol {
         vid: u16,
         pid: u16,
         transport: &ZmkTransport,
+        hid_serial_number: Option<String>,
     ) -> Result<Self, Box<dyn Error>> {
         let zmk_data = zmk_rpc::fetch_zmk_data(transport)?;
         let (definition, layout_keys, layer_count) = build_from_zmk_data(vid, pid, zmk_data)?;
@@ -43,39 +45,68 @@ impl ZmkProtocol {
             definition,
             layout_keys,
             layer_count,
+            hid_serial_number,
         }))
     }
 
     fn open_hid(layout: Arc<ZmkLayout>) -> Result<Self, Box<dyn Error>> {
         let (vid, pid) = (layout.definition.vid, layout.definition.pid);
-        wait_for_hid_reappearance(vid, pid, ZMK_USAGE_PAGE, Duration::from_secs(8))
-            .map_err(std::io::Error::other)?;
-        let hid_device = open_zmk_hid(vid, pid).map_err(|e| {
-            std::io::Error::other(format!(
-                "Failed to connect HID ({vid:04x}:{pid:04x}) after reappearance: {e}"
-            ))
-        })?;
+        wait_for_hid_reappearance(
+            vid,
+            pid,
+            ZMK_USAGE_PAGE,
+            layout.hid_serial_number.as_deref(),
+            Duration::from_secs(8),
+        )
+        .map_err(std::io::Error::other)?;
+        let hid_device =
+            open_zmk_hid(vid, pid, layout.hid_serial_number.as_deref()).map_err(|e| {
+                std::io::Error::other(format!(
+                    "Failed to connect HID ({vid:04x}:{pid:04x}) after reappearance: {e}"
+                ))
+            })?;
 
         Ok(Self { hid_device, layout })
     }
 }
 
-fn open_zmk_hid(vid: u16, pid: u16) -> Result<HidDevice, String> {
+fn open_zmk_hid(
+    vid: u16,
+    pid: u16,
+    expected_serial_number: Option<&str>,
+) -> Result<HidDevice, String> {
     let api = HidApi::new().map_err(|e| format!("hidapi init failed: {e}"))?;
-    let path = api
-        .device_list()
-        .find(|device| {
-            device.vendor_id() == vid
-                && device.product_id() == pid
-                && device.usage_page() == ZMK_USAGE_PAGE
-        })
-        .map(|device| device.path().to_owned())
-        .ok_or_else(|| {
+    let mut matches = api.device_list().filter(|device| {
+        device.vendor_id() == vid
+            && device.product_id() == pid
+            && device.usage_page() == ZMK_USAGE_PAGE
+    });
+    let path = if let Some(expected_serial_number) = expected_serial_number {
+        matches
+            .find(|device| {
+                serial_number_matches(Some(expected_serial_number), device.serial_number())
+            })
+            .map(|device| device.path().to_owned())
+            .ok_or_else(|| {
+                format!(
+                    "could not find HID interface for saved serial number {expected_serial_number}"
+                )
+            })?
+    } else {
+        let first = matches.next().ok_or_else(|| {
             format!(
                 "could not find HID interface for {:04x}:{:04x} usage 0x{:04x}",
                 vid, pid, ZMK_USAGE_PAGE
             )
         })?;
+        let path = first.path().to_owned();
+        if matches.next().is_some() {
+            return Err(format!(
+                "cannot safely select ZMK HID interface: multiple devices use {vid:04x}:{pid:04x}"
+            ));
+        }
+        path
+    };
 
     api.open_path(&path).map_err(|e| e.to_string())
 }
@@ -84,6 +115,7 @@ fn wait_for_hid_reappearance(
     vid: u16,
     pid: u16,
     usage_page: u16,
+    expected_serial_number: Option<&str>,
     timeout: Duration,
 ) -> Result<(), String> {
     // On Linux BLE, the HID node can temporarily disappear while HoG/GATT activity settles; wait
@@ -95,7 +127,9 @@ fn wait_for_hid_reappearance(
         let mut matched = false;
         for d in api.device_list() {
             if d.vendor_id() == vid && d.product_id() == pid {
-                if d.usage_page() == usage_page {
+                if d.usage_page() == usage_page
+                    && serial_number_matches(expected_serial_number, d.serial_number())
+                {
                     matched = true;
                     break;
                 }
@@ -109,9 +143,7 @@ fn wait_for_hid_reappearance(
     }
 
     if device_present_without_usage {
-        return Err(format!(
-            "Please re-pair the keyboard to refresh the HID descriptor."
-        ));
+        return Err("Please re-pair the keyboard to refresh the HID descriptor.".to_string());
     }
 
     Err(format!(
@@ -121,6 +153,10 @@ fn wait_for_hid_reappearance(
         pid,
         usage_page
     ))
+}
+
+fn serial_number_matches(expected: Option<&str>, observed: Option<&str>) -> bool {
+    expected.is_none_or(|expected| observed == Some(expected))
 }
 
 impl KeyboardProtocol for ZmkProtocol {
@@ -231,4 +267,17 @@ fn build_from_zmk_data(
     }
 
     Ok((definition, layout_keys_3d, layer_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::serial_number_matches;
+
+    #[test]
+    fn exact_serial_wait_ignores_other_identical_keyboards() {
+        assert!(serial_number_matches(None, Some("office")));
+        assert!(serial_number_matches(Some("home"), Some("home")));
+        assert!(!serial_number_matches(Some("home"), Some("office")));
+        assert!(!serial_number_matches(Some("home"), None));
+    }
 }

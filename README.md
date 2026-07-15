@@ -102,7 +102,21 @@ KeyPeek will read layout and keymap directly from the device for ZMK without req
 
 ## Usage
 
-Devices are scanned when the app starts. For QMK you will be prompted to select the `keyboard_info.json` generated from your keymap when you connect. For Vial and ZMK, just select the connected device from the dropdown, since they provide layout information directly.
+Devices are scanned when the app starts and whenever Settings opens. Use the refresh button next to the device picker to scan again at any time. For QMK you will be prompted to select the `keyboard_info.json` generated from your keymap when you connect. For Vial and ZMK, just select the connected device from the dropdown, since they provide layout information directly.
+
+Every successful connection with a stable device identity is saved once under **Connection** in Settings. QMK connections remember the canonical `keyboard_info.json` path and selected layout. Vial and ZMK read their layout and keymap from the keyboard again when they connect. ZMK serial devices without a USB serial number can connect manually, but are not saved because operating systems can reuse port names. Saved connections can be enabled, disabled, connected directly, or removed. The main Connect button becomes Disconnect while a keyboard is connected.
+
+Enable **Auto-connect** to try enabled saved connections when KeyPeek starts. **Last connected** moves a successful connection to the front. **Manual** keeps your drag-and-drop order. KeyPeek tries every enabled connection in order, waits three seconds, and repeats for five rounds. It then shows a temporary failure message and stops until the user opens Settings.
+
+KeyPeek stores these values with the existing settings:
+
+- macOS: `~/Library/Application Support/dev.srwi.KeyPeek/settings.ini`
+- Windows: the KeyPeek application config directory under `%APPDATA%`
+- Linux: the KeyPeek application config directory under `$XDG_CONFIG_HOME`, or `~/.config` when unset
+
+**Start KeyPeek on login** appears only when the current installation supports it. KeyPeek uses the native per-user startup mechanism on each platform: ServiceManagement on macOS, the `HKCU` Run key on Windows, and XDG autostart on Linux. macOS requires a signed `.app` bundle.
+
+For local macOS builds, set `KEYPEEK_CODESIGN_IDENTITY` to a stable development or self-signed certificate name, then run `scripts/bundle-macos.sh`. The helper does not change the bundle identifier and deliberately refuses ad-hoc signing so macOS sees a stable app identity.
 
 <img src=".github/assets/settings_window.png" alt="Settings window screenshot" width="60%">
 

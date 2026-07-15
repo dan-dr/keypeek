@@ -1,8 +1,8 @@
 use crate::connection::ConnectionTask;
-use crate::device_discovery::DiscoveredDevice;
+use crate::device_discovery::{DiscoveredDevice, DiscoveryTask};
 use crate::keyboard::Keyboard;
-use crate::protocols::{ConnectionSpec, KeyboardDefinition, Reopener};
-use crate::settings::{ProtocolType, Settings};
+use crate::protocols::{ConnectionIdentity, ConnectionSpec, KeyboardDefinition, Reopener};
+use crate::settings::{ProtocolType, SavedConnection, Settings};
 
 use egui_file_dialog::FileDialog;
 use std::sync::Arc;
@@ -26,13 +26,39 @@ pub struct KeyColors {
 pub enum AppConnectionState {
     Disconnected,
     Connected { keyboard: Keyboard },
-    Reconnecting { next_attempt_at: Instant },
+    AutoConnecting,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionOrigin {
+    Manual,
+    Automatic,
+}
+
+pub struct AutoConnectState {
+    pub candidates: Vec<SavedConnection>,
+    pub round: usize,
+    pub next_index: usize,
+    pub next_attempt_at: Instant,
+    pub reopen_identity: Option<ConnectionIdentity>,
+    pub reopen: Option<Arc<dyn Reopener>>,
+}
+
+pub struct UiNotice {
+    pub message: String,
+    pub success: bool,
+    pub expires_at: Instant,
 }
 
 #[derive(Clone)]
 pub enum ZmkTransportDraft {
-    Serial { port_name: Option<String> },
-    Ble { device_id: Option<String> },
+    Serial {
+        port_name: Option<String>,
+        serial_number: Option<String>,
+    },
+    Ble {
+        device_id: Option<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -58,6 +84,8 @@ pub struct UiState {
     pub settings_warning: Option<String>,
     pub mouse_passthrough: Option<bool>,
     pub file_dialog: FileDialog,
+    pub notice: Option<UiNotice>,
+    pub dragged_connection: Option<ConnectionIdentity>,
 }
 
 pub struct SettingsState {
@@ -68,7 +96,9 @@ pub struct SettingsState {
 pub struct SessionState {
     pub connection: AppConnectionState,
     pub ever_connected: bool,
-    pub last_spec: Option<ConnectionSpec>,
+    pub current_identity: Option<ConnectionIdentity>,
+    pub current_spec: Option<ConnectionSpec>,
+    pub current_display_name: String,
     pub reopen: Option<Arc<dyn Reopener>>,
     pub connected_definition: Option<KeyboardDefinition>,
     pub layout_names: Vec<String>,
@@ -79,6 +109,10 @@ pub struct SessionState {
 pub struct ConnectDraftState {
     pub available_devices: Vec<DiscoveredDevice>,
     pub selected_device_index: Option<usize>,
+    pub selected_saved_identity: Option<ConnectionIdentity>,
     pub draft: ConnectionDraft,
     pub pending_connect: Option<ConnectionTask>,
+    pub pending_origin: Option<ConnectionOrigin>,
+    pub auto_connect: Option<AutoConnectState>,
+    pub discovery_task: Option<DiscoveryTask>,
 }

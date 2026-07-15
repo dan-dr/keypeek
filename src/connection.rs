@@ -1,6 +1,7 @@
 use crate::keyboard::Keyboard;
 use crate::protocols::{
-    connect_protocol, ConnectionSpec, DeviceLocked, KeyboardDefinition, KeyboardProtocol, Reopener,
+    connect_protocol, ConnectionIdentity, ConnectionSpec, DeviceLocked, KeyboardDefinition,
+    KeyboardProtocol, Reopener,
 };
 use crate::ui_wake::UiWake;
 use std::error::Error;
@@ -14,13 +15,36 @@ pub struct ConnectionRequest {
     pub timeout: i64,
     pub layout_name: Option<String>,
     pub reopen: Option<Arc<dyn Reopener>>,
+    pub expected_identity: Option<ConnectionIdentity>,
+    pub display_name: String,
 }
 
 impl ConnectionRequest {
-    fn open_protocol(&self) -> Result<Box<dyn KeyboardProtocol>, String> {
+    fn open_protocol(
+        &self,
+    ) -> Result<
+        (
+            Box<dyn KeyboardProtocol>,
+            ConnectionIdentity,
+            ConnectionSpec,
+        ),
+        String,
+    > {
         let result = match &self.reopen {
-            Some(reopener) => reopener.reopen(),
-            None => connect_protocol(&self.spec),
+            Some(reopener) => match self.expected_identity.clone() {
+                None => Err(Box::<dyn Error>::from(
+                    "Missing identity for reopened connection",
+                )),
+                Some(identity) if !identity.supports_cached_reopen() => {
+                    Err(Box::<dyn Error>::from(
+                        "Cached reopen requires a verified ZMK USB serial identity",
+                    ))
+                }
+                Some(identity) => reopener
+                    .reopen()
+                    .map(|protocol| (protocol, identity, self.spec.clone())),
+            },
+            None => connect_protocol(&self.spec, self.expected_identity.as_ref()),
         };
         result.map_err(|e| format_connect_error(&self.spec, e.as_ref()))
     }
@@ -52,6 +76,9 @@ fn format_connect_error(spec: &ConnectionSpec, error: &(dyn Error + 'static)) ->
 }
 
 pub struct ConnectedState {
+    pub identity: ConnectionIdentity,
+    pub spec: ConnectionSpec,
+    pub display_name: String,
     pub definition: KeyboardDefinition,
     pub layout_names: Vec<String>,
     pub selected_layout_name: String,
@@ -89,7 +116,7 @@ pub fn build_connected_state(
     request: ConnectionRequest,
     ui_wake: UiWake,
 ) -> Result<ConnectedState, String> {
-    let protocol = request.open_protocol()?;
+    let (protocol, identity, normalized_spec) = request.open_protocol()?;
 
     let reopen = protocol.reopener();
     let layout_names = protocol.get_layout_definition().get_layout_names();
@@ -105,6 +132,9 @@ pub fn build_connected_state(
     .map_err(|e| format!("Failed to create keyboard: {e}"))?;
 
     Ok(ConnectedState {
+        identity,
+        spec: normalized_spec,
+        display_name: request.display_name,
         definition,
         layout_names,
         selected_layout_name,

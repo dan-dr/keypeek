@@ -2,6 +2,7 @@ use crate::device_discovery::DiscoveredDevice;
 use crate::settings::Settings;
 
 mod eframe_host;
+pub mod startup;
 
 #[cfg(target_os = "linux")]
 mod wayland;

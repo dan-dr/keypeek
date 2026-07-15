@@ -20,7 +20,9 @@ pub struct Keyboard {
     default_layer_state: Arc<Mutex<u32>>,
     timeout_ms: Arc<Mutex<i64>>,
     alive: Arc<AtomicBool>,
+    stop_requested: Arc<AtomicBool>,
     _keepalive: Option<mpsc::Sender<()>>,
+    reader: Option<thread::JoinHandle<()>>,
 }
 
 impl Keyboard {
@@ -49,6 +51,7 @@ impl Keyboard {
         let timeout_ms = Arc::new(Mutex::new(timeout));
         let matrix = Arc::new(Mutex::new(matrix));
         let alive = Arc::new(AtomicBool::new(true));
+        let stop_requested = Arc::new(AtomicBool::new(false));
 
         let keepalive = protocol.subscription_sender().map(|sender| {
             let (tx, rx) = mpsc::channel::<()>();
@@ -73,7 +76,9 @@ impl Keyboard {
             default_layer_state: Arc::clone(&default_layer_state),
             timeout_ms: Arc::clone(&timeout_ms),
             alive: Arc::clone(&alive),
+            stop_requested: Arc::clone(&stop_requested),
             _keepalive: keepalive,
+            reader: None,
         };
 
         let layer_state_clone = Arc::clone(&keyboard.layer_state);
@@ -82,20 +87,27 @@ impl Keyboard {
         let timeout_clone = Arc::clone(&keyboard.timeout_ms);
         let matrix_clone = Arc::clone(&matrix);
         let alive_clone = Arc::clone(&alive);
+        let stop_requested_clone = Arc::clone(&stop_requested);
 
-        thread::spawn(move || {
+        let reader = thread::spawn(move || {
             // A dropped link (sleep, BLE/USB disconnect) makes `hid_read` error repeatedly.
             // Mark the connection dead after a few consecutive errors to trigger reconnect.
             const MAX_CONSECUTIVE_ERRORS: u32 = 5;
             let mut consecutive_errors: u32 = 0;
 
             loop {
+                if stop_requested_clone.load(Ordering::Relaxed) {
+                    break;
+                }
                 let response = match protocol.hid_read() {
                     Ok(response) => {
                         consecutive_errors = 0;
                         response
                     }
                     Err(_) => {
+                        if stop_requested_clone.load(Ordering::Relaxed) {
+                            break;
+                        }
                         consecutive_errors += 1;
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                             alive_clone.store(false, Ordering::Relaxed);
@@ -162,11 +174,23 @@ impl Keyboard {
             }
         });
 
+        let mut keyboard = keyboard;
+        keyboard.reader = Some(reader);
+
         Ok(keyboard)
     }
 
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Relaxed)
+    }
+
+    pub fn disconnect(&mut self) {
+        self.stop_requested.store(true, Ordering::Relaxed);
+        self.alive.store(false, Ordering::Relaxed);
+        self._keepalive.take();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 
     pub fn get_effective_key_layer(&self, row: usize, col: usize) -> (u8, bool) {
@@ -183,10 +207,10 @@ impl Keyboard {
             let layer_mask = 1u32 << (i as u32);
             let is_active_default_layer = (default_layer_state & layer_mask) != 0;
             let is_active_momentary_layer = (layer_state & layer_mask) != 0;
-            if is_active_momentary_layer || is_active_default_layer {
-                if !matrix.is_transparent(i, row, col) {
-                    return (i as u8, is_active_default_layer && active_layer_above);
-                }
+            if (is_active_momentary_layer || is_active_default_layer)
+                && !matrix.is_transparent(i, row, col)
+            {
+                return (i as u8, is_active_default_layer && active_layer_above);
             }
             active_layer_above |= is_active_momentary_layer;
         }
@@ -212,5 +236,11 @@ impl Keyboard {
 
     pub fn set_layout(&mut self, layout: KeyboardLayout) {
         self.layout = layout;
+    }
+}
+
+impl Drop for Keyboard {
+    fn drop(&mut self) {
+        self.disconnect();
     }
 }

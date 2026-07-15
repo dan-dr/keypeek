@@ -58,6 +58,29 @@ impl OverlayApp {
 
         keyboard.set_layout(next_layout);
         self.session.active_layout_name = selected_layout;
+        if let Some(identity) = self.session.current_identity.as_ref() {
+            if let Some(saved) = self
+                .settings
+                .active
+                .saved_connections
+                .iter_mut()
+                .find(|saved| &saved.identity == identity)
+            {
+                if matches!(saved.spec, crate::protocols::ConnectionSpec::Via { .. }) {
+                    saved.layout_name = Some(self.session.active_layout_name.clone());
+                    if let Some(draft_saved) = self
+                        .settings
+                        .draft
+                        .saved_connections
+                        .iter_mut()
+                        .find(|draft| &draft.identity == identity)
+                    {
+                        draft_saved.layout_name = saved.layout_name.clone();
+                    }
+                    self.persist_settings();
+                }
+            }
+        }
     }
 
     pub(super) fn get_anchor_params(&self) -> (Align2, egui::Vec2) {
@@ -103,7 +126,7 @@ impl OverlayApp {
 
     pub(super) fn overlay_visible(&self) -> bool {
         match &self.session.connection {
-            AppConnectionState::Disconnected | AppConnectionState::Reconnecting { .. } => false,
+            AppConnectionState::Disconnected | AppConnectionState::AutoConnecting => false,
             AppConnectionState::Connected { keyboard } => {
                 if self.ui.settings_visible {
                     true

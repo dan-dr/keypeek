@@ -1,9 +1,12 @@
 use crate::protocols::zmk_rpc;
+use crate::ui_wake::UiWake;
 use std::collections::HashSet;
+use std::sync::mpsc::{self, TryRecvError};
 
 const VIA_USAGE_PAGE: u16 = 0xff60;
 
 struct HidInfo {
+    path: Vec<u8>,
     vendor_id: u16,
     product_id: u16,
     usage_page: u16,
@@ -18,6 +21,7 @@ fn scan_all_hid() -> Vec<HidInfo> {
     };
     api.device_list()
         .map(|d| HidInfo {
+            path: d.path().to_bytes().to_vec(),
             vendor_id: d.vendor_id(),
             product_id: d.product_id(),
             usage_page: d.usage_page(),
@@ -45,13 +49,15 @@ impl DeviceKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiscoveredDevice {
     pub base_name: String,
     pub vid: u16,
     pub pid: u16,
     pub serial_port: Option<String>,
+    pub serial_number: Option<String>,
     pub ble_device_id: Option<String>,
+    pub hid_path: Option<Vec<u8>>,
     pub kind: DeviceKind,
 }
 
@@ -79,13 +85,9 @@ pub fn discover_devices() -> Vec<DiscoveredDevice> {
     let mut zmk_vid_pid: HashSet<(u16, u16)> = HashSet::new();
 
     {
-        let mut seen_via: HashSet<(u16, u16)> = HashSet::new();
         for dev in &all_hid {
             if dev.usage_page != VIA_USAGE_PAGE {
                 continue;
-            }
-            if !seen_via.insert((dev.vendor_id, dev.product_id)) {
-                continue; // Duplicate interface for same device
             }
             let base_name = dev
                 .product
@@ -103,7 +105,9 @@ pub fn discover_devices() -> Vec<DiscoveredDevice> {
                 vid: dev.vendor_id,
                 pid: dev.product_id,
                 serial_port: None,
+                serial_number: dev.serial_number.clone(),
                 ble_device_id: None,
+                hid_path: Some(dev.path.clone()),
                 kind,
             });
             if kind == DeviceKind::Zmk {
@@ -125,7 +129,9 @@ pub fn discover_devices() -> Vec<DiscoveredDevice> {
             vid: sp.vid,
             pid: sp.pid,
             serial_port: Some(sp.port_name),
+            serial_number: sp.serial_number,
             ble_device_id: None,
+            hid_path: None,
             kind: DeviceKind::Zmk,
         });
         zmk_vid_pid.insert((sp.vid, sp.pid));
@@ -164,7 +170,9 @@ pub fn discover_devices() -> Vec<DiscoveredDevice> {
                     vid: hid.vendor_id,
                     pid: hid.product_id,
                     serial_port: None,
+                    serial_number: hid.serial_number.clone(),
                     ble_device_id: Some(ble.device_id),
+                    hid_path: Some(hid.path.clone()),
                     kind: DeviceKind::Zmk,
                 });
                 zmk_vid_pid.insert((hid.vendor_id, hid.product_id));
@@ -182,16 +190,42 @@ pub fn discover_devices() -> Vec<DiscoveredDevice> {
         d.kind != DeviceKind::Zmk || d.ble_device_id.is_some() || d.serial_port.is_some()
     });
 
-    devices.sort_by(|a, b| a.display_name().cmp(&b.display_name()));
+    devices.sort_by_key(|device| device.display_name());
     devices.dedup_by(|a, b| {
         a.vid == b.vid
             && a.pid == b.pid
             && a.kind == b.kind
             && a.serial_port == b.serial_port
+            && a.serial_number == b.serial_number
             && a.ble_device_id == b.ble_device_id
+            && a.hid_path == b.hid_path
     });
 
     devices
+}
+
+pub struct DiscoveryTask {
+    rx: mpsc::Receiver<Vec<DiscoveredDevice>>,
+}
+
+impl DiscoveryTask {
+    pub fn start(ui_wake: UiWake) -> Self {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let devices = discover_devices();
+            let _ = tx.send(devices);
+            ui_wake.request_repaint();
+        });
+        Self { rx }
+    }
+
+    pub fn try_finish(&self) -> Option<Vec<DiscoveredDevice>> {
+        match self.rx.try_recv() {
+            Ok(devices) => Some(devices),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Vec::new()),
+        }
+    }
 }
 
 fn is_possible_ble_match(hid: &HidInfo, ble_name: &str) -> bool {
@@ -263,7 +297,9 @@ mod tests {
             vid: 0x1234,
             pid: 0xABCD,
             serial_port: None,
+            serial_number: None,
             ble_device_id: None,
+            hid_path: None,
             kind: DeviceKind::Zmk,
         };
         assert_eq!(board.display_name(), "Board (ZMK BLE, 1234:ABCD)");
@@ -283,7 +319,9 @@ mod tests {
             vid: 0,
             pid: 0,
             serial_port: None,
+            serial_number: None,
             ble_device_id: None,
+            hid_path: None,
             kind: DeviceKind::Vial,
         };
         let qmk_board = DiscoveredDevice {
@@ -291,7 +329,9 @@ mod tests {
             vid: 0x0A0B,
             pid: 0x0C0D,
             serial_port: None,
+            serial_number: None,
             ble_device_id: None,
+            hid_path: None,
             kind: DeviceKind::Qmk,
         };
         assert_eq!(vial_board.display_name(), "Board (Vial, 0000:0000)");
@@ -305,7 +345,9 @@ mod tests {
             vid: 1,
             pid: 2,
             serial_port: Some("COM3".to_string()),
+            serial_number: Some("serial".to_string()),
             ble_device_id: None,
+            hid_path: None,
             kind: DeviceKind::Zmk,
         };
         let ble = DiscoveredDevice {
@@ -313,7 +355,9 @@ mod tests {
             vid: 1,
             pid: 2,
             serial_port: None,
+            serial_number: None,
             ble_device_id: Some("id".to_string()),
+            hid_path: None,
             kind: DeviceKind::Zmk,
         };
         assert!(serial.display_name().contains("ZMK Serial"));
@@ -323,6 +367,7 @@ mod tests {
     #[test]
     fn ble_match_prefers_non_via_interface() {
         let via_hid = HidInfo {
+            path: Vec::new(),
             vendor_id: 0x1234,
             product_id: 0x5678,
             usage_page: VIA_USAGE_PAGE,
@@ -331,6 +376,7 @@ mod tests {
             serial_number: None,
         };
         let non_via_hid = HidInfo {
+            path: Vec::new(),
             vendor_id: 0x1234,
             product_id: 0x5678,
             usage_page: 0x0001,
@@ -347,6 +393,7 @@ mod tests {
     #[test]
     fn ble_match_falls_back_to_via_interface() {
         let via_hid = HidInfo {
+            path: Vec::new(),
             vendor_id: 0x1234,
             product_id: 0x5678,
             usage_page: VIA_USAGE_PAGE,
@@ -363,6 +410,7 @@ mod tests {
     #[test]
     fn ble_match_handles_backend_decorated_name() {
         let hid = HidInfo {
+            path: Vec::new(),
             vendor_id: 0x1234,
             product_id: 0x5678,
             usage_page: VIA_USAGE_PAGE,
@@ -377,6 +425,7 @@ mod tests {
     #[test]
     fn probable_zmk_hid_detects_zmk_project_manufacturer() {
         let hid = HidInfo {
+            path: Vec::new(),
             vendor_id: 0x1234,
             product_id: 0x5678,
             usage_page: VIA_USAGE_PAGE,

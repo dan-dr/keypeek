@@ -20,7 +20,7 @@ impl ViaProtocol {
     }
 
     fn get_api(vid: u16, pid: u16) -> Result<KeyboardApi, Box<dyn Error>> {
-        let api = KeyboardApi::new(vid, pid, 0xff60, None)
+        let mut api = KeyboardApi::new(vid, pid, 0xff60, None)
             .map_err(|e| format!("Failed to connect to device ({vid:04x}:{pid:04x}): {e}"))?;
 
         let protocol_version = api
@@ -34,6 +34,8 @@ impl ViaProtocol {
             )
             .into());
         }
+
+        api.set_timeout(200);
 
         Ok(api)
     }

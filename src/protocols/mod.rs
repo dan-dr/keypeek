@@ -7,8 +7,10 @@ pub mod zmk;
 pub mod zmk_rpc;
 
 use crate::layout_key::LayoutKey;
+use hidapi::{HidApi, HidDevice};
 use qmk_via_api::api::KeyboardApi;
 use std::error::Error;
+use std::ffi::CStr;
 use std::sync::Arc;
 
 use self::via::ViaProtocol;
@@ -106,14 +108,29 @@ pub trait SubscriptionSender: Send {
 }
 
 pub struct RawHidSubscription {
-    api: KeyboardApi,
+    handle: RawHidSubscriptionHandle,
+}
+
+enum RawHidSubscriptionHandle {
+    Api(KeyboardApi),
+    Device(HidDevice),
 }
 
 impl RawHidSubscription {
     pub fn open(vid: u16, pid: u16) -> Option<Box<dyn SubscriptionSender>> {
-        KeyboardApi::new(vid, pid, 0xff60, None)
-            .ok()
-            .map(|api| Box::new(Self { api }) as Box<dyn SubscriptionSender>)
+        KeyboardApi::new(vid, pid, 0xff60, None).ok().map(|api| {
+            Box::new(Self {
+                handle: RawHidSubscriptionHandle::Api(api),
+            }) as Box<dyn SubscriptionSender>
+        })
+    }
+
+    pub fn open_path(path: &CStr) -> Option<Box<dyn SubscriptionSender>> {
+        let api = HidApi::new().ok()?;
+        let device = api.open_path(path).ok()?;
+        Some(Box::new(Self {
+            handle: RawHidSubscriptionHandle::Device(device),
+        }))
     }
 }
 
@@ -124,19 +141,38 @@ impl SubscriptionSender for RawHidSubscription {
         } else {
             KEYPEEK_SUBSCRIBE_INACTIVE
         };
-        self.api
-            .hid_send(vec![KEYPEEK_SUBSCRIBE_MARKER, value])
-            .map_err(|e| format!("Subscription keepalive write error: {e}").into())
+        match &self.handle {
+            RawHidSubscriptionHandle::Api(api) => api
+                .hid_send(vec![KEYPEEK_SUBSCRIBE_MARKER, value])
+                .map_err(|e| format!("Subscription keepalive write error: {e}").into()),
+            RawHidSubscriptionHandle::Device(device) => {
+                let mut report = vec![0; 33];
+                report[1] = KEYPEEK_SUBSCRIBE_MARKER;
+                report[2] = value;
+                let written = device.write(&report)?;
+                if written != report.len() {
+                    return Err(format!(
+                        "Subscription keepalive wrote {written} of {} bytes",
+                        report.len()
+                    )
+                    .into());
+                }
+                Ok(())
+            }
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ZmkTransportConfig {
-    Serial(String),
+    Serial {
+        port_name: String,
+        serial_number: Option<String>,
+    },
     Ble(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectionSpec {
     Via {
         json_path: String,
@@ -144,6 +180,8 @@ pub enum ConnectionSpec {
     Vial {
         vid: u16,
         pid: u16,
+        #[serde(default)]
+        hid_path: Option<Vec<u8>>,
     },
     Zmk {
         vid: u16,
@@ -152,33 +190,239 @@ pub enum ConnectionSpec {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ZmkSerialIdentity {
+    SerialNumber(String),
+    PortName(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ConnectionIdentity {
+    Via {
+        vid: u16,
+        pid: u16,
+        json_path: String,
+    },
+    Vial {
+        keyboard_uid: [u8; 8],
+    },
+    ZmkBle {
+        vid: u16,
+        pid: u16,
+        device_id: String,
+    },
+    ZmkSerial {
+        vid: u16,
+        pid: u16,
+        device: ZmkSerialIdentity,
+    },
+}
+
+impl ConnectionIdentity {
+    pub fn has_stable_identity(&self) -> bool {
+        !matches!(
+            self,
+            Self::ZmkSerial {
+                device: ZmkSerialIdentity::PortName(_),
+                ..
+            }
+        )
+    }
+
+    pub fn supports_cached_reopen(&self) -> bool {
+        matches!(
+            self,
+            Self::ZmkSerial {
+                device: ZmkSerialIdentity::SerialNumber(_),
+                ..
+            }
+        )
+    }
+}
+
+pub type ConnectedProtocol = (
+    Box<dyn KeyboardProtocol>,
+    ConnectionIdentity,
+    ConnectionSpec,
+);
+
 pub fn connect_protocol(
     spec: &ConnectionSpec,
-) -> Result<Box<dyn KeyboardProtocol>, Box<dyn Error>> {
+    expected_identity: Option<&ConnectionIdentity>,
+) -> Result<ConnectedProtocol, Box<dyn Error>> {
     match spec {
         ConnectionSpec::Via { json_path } => {
             let protocol = ViaProtocol::connect(json_path)?;
-            Ok(Box::new(protocol))
+            let definition = protocol.get_layout_definition();
+            let canonical_path = std::fs::canonicalize(json_path)?;
+            let canonical_path = canonical_path.to_string_lossy().into_owned();
+            let identity = ConnectionIdentity::Via {
+                vid: definition.vid,
+                pid: definition.pid,
+                json_path: canonical_path.clone(),
+            };
+            validate_expected_identity(expected_identity, &identity)?;
+            Ok((
+                Box::new(protocol),
+                identity,
+                ConnectionSpec::Via {
+                    json_path: canonical_path,
+                },
+            ))
         }
-        ConnectionSpec::Vial { vid, pid } => {
-            let protocol = VialProtocol::connect(*vid, *pid)?;
-            Ok(Box::new(protocol))
+        ConnectionSpec::Vial { vid, pid, hid_path } => {
+            let expected_uid = match expected_identity {
+                Some(ConnectionIdentity::Vial { keyboard_uid }) => Some(*keyboard_uid),
+                _ => None,
+            };
+            let protocol =
+                VialProtocol::connect_expected(*vid, *pid, expected_uid, hid_path.as_deref())?;
+            let identity = ConnectionIdentity::Vial {
+                keyboard_uid: protocol.keyboard_uid(),
+            };
+            validate_expected_identity(expected_identity, &identity)?;
+            Ok((
+                Box::new(protocol),
+                identity,
+                ConnectionSpec::Vial {
+                    vid: *vid,
+                    pid: *pid,
+                    hid_path: None,
+                },
+            ))
         }
         ConnectionSpec::Zmk {
             vid,
             pid,
             transport,
         } => {
-            let zmk_transport = match transport {
-                ZmkTransportConfig::Serial(port_name) => {
-                    zmk_rpc::ZmkTransport::SerialPort(port_name.clone())
+            let (zmk_transport, identity, normalized_spec) = match transport {
+                ZmkTransportConfig::Serial {
+                    port_name,
+                    serial_number,
+                } => {
+                    if serial_number.is_none() && expected_identity.is_some() {
+                        return Err(
+                            "Cannot reconnect this saved ZMK serial connection because the keyboard has no stable serial number"
+                                .into(),
+                        );
+                    }
+                    let ports = zmk_rpc::scan_serial_ports();
+                    let resolved_port = if let Some(serial_number) = serial_number {
+                        ports
+                            .iter()
+                            .find(|port| {
+                                port.vid == *vid
+                                    && port.pid == *pid
+                                    && port.serial_number.as_ref() == Some(serial_number)
+                            })
+                            .map(|port| port.port_name.clone())
+                            .ok_or_else(|| {
+                                format!(
+                                    "Could not find saved ZMK keyboard with serial number {serial_number}"
+                                )
+                            })?
+                    } else {
+                        ports
+                            .iter()
+                            .find(|port| {
+                                port.vid == *vid && port.pid == *pid && port.port_name == *port_name
+                            })
+                            .map(|port| port.port_name.clone())
+                            .ok_or_else(|| {
+                                format!(
+                                    "Saved ZMK serial port {port_name} is not currently available"
+                                )
+                            })?
+                    };
+                    let device = serial_number
+                        .clone()
+                        .map(ZmkSerialIdentity::SerialNumber)
+                        .unwrap_or_else(|| ZmkSerialIdentity::PortName(resolved_port.clone()));
+                    (
+                        zmk_rpc::ZmkTransport::SerialPort(resolved_port.clone()),
+                        ConnectionIdentity::ZmkSerial {
+                            vid: *vid,
+                            pid: *pid,
+                            device,
+                        },
+                        ConnectionSpec::Zmk {
+                            vid: *vid,
+                            pid: *pid,
+                            transport: ZmkTransportConfig::Serial {
+                                port_name: resolved_port,
+                                serial_number: serial_number.clone(),
+                            },
+                        },
+                    )
                 }
-                ZmkTransportConfig::Ble(device_id) => {
-                    zmk_rpc::ZmkTransport::BleDevice(device_id.clone())
-                }
+                ZmkTransportConfig::Ble(device_id) => (
+                    zmk_rpc::ZmkTransport::BleDevice(device_id.clone()),
+                    ConnectionIdentity::ZmkBle {
+                        vid: *vid,
+                        pid: *pid,
+                        device_id: device_id.clone(),
+                    },
+                    spec.clone(),
+                ),
             };
-            let protocol = ZmkProtocol::connect_live(*vid, *pid, &zmk_transport)?;
-            Ok(Box::new(protocol))
+            let hid_serial_number = match &identity {
+                ConnectionIdentity::ZmkSerial {
+                    device: ZmkSerialIdentity::SerialNumber(serial_number),
+                    ..
+                } => Some(serial_number.clone()),
+                _ => None,
+            };
+            let protocol =
+                ZmkProtocol::connect_live(*vid, *pid, &zmk_transport, hid_serial_number)?;
+            validate_expected_identity(expected_identity, &identity)?;
+            Ok((Box::new(protocol), identity, normalized_spec))
         }
+    }
+}
+
+fn validate_expected_identity(
+    expected: Option<&ConnectionIdentity>,
+    observed: &ConnectionIdentity,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(expected) = expected {
+        if expected != observed {
+            return Err(format!(
+                "Connected keyboard identity does not match the saved connection: expected {expected:?}, observed {observed:?}"
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConnectionIdentity, ZmkSerialIdentity};
+
+    #[test]
+    fn cached_reopen_requires_verified_zmk_serial_number() {
+        let serial = ConnectionIdentity::ZmkSerial {
+            vid: 1,
+            pid: 2,
+            device: ZmkSerialIdentity::SerialNumber("exact".to_string()),
+        };
+        let port = ConnectionIdentity::ZmkSerial {
+            vid: 1,
+            pid: 2,
+            device: ZmkSerialIdentity::PortName("/dev/tty.test".to_string()),
+        };
+        let ble = ConnectionIdentity::ZmkBle {
+            vid: 1,
+            pid: 2,
+            device_id: "exact".to_string(),
+        };
+
+        assert!(serial.supports_cached_reopen());
+        assert!(!port.supports_cached_reopen());
+        assert!(!ble.supports_cached_reopen());
+        assert!(serial.has_stable_identity());
+        assert!(!port.has_stable_identity());
+        assert!(ble.has_stable_identity());
     }
 }

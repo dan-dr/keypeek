@@ -119,6 +119,8 @@ fn run_inner(
         .with_decorations(false)
         .with_taskbar(false)
         .with_maximized(true)
+        .with_resizable(false)
+        .with_movable_by_background(false)
         .with_transparent(true)
         .with_has_shadow(false)
         .with_always_on_top();

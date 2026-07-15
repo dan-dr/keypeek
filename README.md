@@ -1,4 +1,4 @@
-# KeyPeek <img src="resources/icon.svg" align="right" width="15%"/>
+# KeyPeek <img src="resources/icon.png" align="right" width="15%"/>
 
 KeyPeek provides a live on-screen overlay of your keyboard, mirroring the active base and momentary layers. It is especially useful when learning complex multi-layer layouts or using boards with missing legends. The overlay updates instantly when layers change, so the view always matches your firmware state. KeyPeek currently supports QMK, Vial, and ZMK keyboards.
 
@@ -117,6 +117,15 @@ KeyPeek stores these values with the existing settings:
 **Start KeyPeek on login** appears only when the current installation supports it. KeyPeek uses the native per-user startup mechanism on each platform: ServiceManagement on macOS, the `HKCU` Run key on Windows, and XDG autostart on Linux. macOS requires a signed `.app` bundle.
 
 For local macOS builds, set `KEYPEEK_CODESIGN_IDENTITY` to a stable development or self-signed certificate name, then run `scripts/bundle-macos.sh`. The helper does not change the bundle identifier and deliberately refuses ad-hoc signing so macOS sees a stable app identity.
+
+To build, sign, and install a development build as an absolute symlink in `~/Applications`, run:
+
+```bash
+export KEYPEEK_CODESIGN_IDENTITY="Apple Development: you@example.com (TEAMID)"
+scripts/bundle-macos.sh --install
+```
+
+The first run preserves an existing non-symlink `~/Applications/KeyPeek.app` as a timestamped backup. Later runs update the symlink in place. Because the link points into `target/release`, rerun the command after `cargo clean` or after moving the repository.
 
 <img src=".github/assets/settings_window.png" alt="Settings window screenshot" width="60%">
 

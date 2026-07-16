@@ -8,6 +8,8 @@ Accepted
 
 2026-07-15
 
+Amended 2026-07-16
+
 ## Context
 
 KeyPeek currently keeps one connection recipe in memory. It cannot reconnect after an app restart, prioritize multiple keyboards, or launch itself at user login. The UI is shared across macOS, Windows, and Linux through egui, while startup registration is platform-specific.
@@ -18,6 +20,7 @@ KeyPeek currently keeps one connection recipe in memory. It cannot reconnect aft
 - Create or update a saved connection only after a successful connection.
 - Deduplicate with exact protocol-owned identities: canonical QMK JSON path plus VID/PID, Vial keyboard UID, or exact ZMK BLE/serial identity. Do not use fuzzy or VID/PID-only ZMK matching.
 - Auto-connect enabled connections in priority order for five rounds, waiting three seconds between rounds.
+- Listen for native wake and unlock notifications behind one shared lifecycle signal, refresh discovery, and start a fresh reconnect cycle. Preserve an explicit manual disconnect across resume events.
 - Support last-connected and manual ordering. Manual ordering uses egui drag and drop.
 - Refresh device discovery asynchronously whenever Settings opens and from an explicit refresh control.
 - Implement startup registration behind one platform interface: `SMAppService` on macOS, the per-user Run registry key on Windows, and an XDG autostart desktop entry on Linux.
@@ -37,6 +40,10 @@ Rejected. Transport or VID/PID fallbacks can merge unrelated devices. Exact iden
 
 Rejected. The data is small and belongs with the existing user settings. A second storage system would add migration and synchronization complexity.
 
+### UI scheduling-gap detection
+
+Rejected. A lock screen does not reliably suspend the app, and wall-clock changes can look like scheduling gaps. Native listeners provide explicit events: `NSWorkspace` on macOS, power/session messages on Windows, and logind D-Bus signals on Linux.
+
 ## Consequences
 
 - Existing settings remain compatible because new fields have defaults.
@@ -44,3 +51,4 @@ Rejected. The data is small and belongs with the existing user settings. A secon
 - Two QMK devices with the same VID/PID and canonical JSON path intentionally share one saved connection recipe.
 - Linux and Windows startup registration do not pretend to have macOS-style signing semantics.
 - The fixed Settings window needs vertical scrolling as the connection section grows.
+- Platform notifications are coalesced before the UI refreshes discovery and restarts reconnect attempts.

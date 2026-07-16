@@ -96,6 +96,7 @@ pub struct SettingsState {
 pub struct SessionState {
     pub connection: AppConnectionState,
     pub ever_connected: bool,
+    pub disconnected_by_user: bool,
     pub current_identity: Option<ConnectionIdentity>,
     pub current_spec: Option<ConnectionSpec>,
     pub current_display_name: String,

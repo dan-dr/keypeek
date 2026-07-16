@@ -138,6 +138,7 @@ fn run_inner(
         viewport,
         ..Default::default()
     };
+    let resume_signal = crate::platform::resume::ResumeSignal::new();
 
     // Hide from the macOS dock so the app only appears as a tray icon.
     #[cfg(target_os = "macos")]
@@ -145,6 +146,14 @@ fn run_inner(
         options.event_loop_builder = Some(Box::new(|builder| {
             use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
             builder.with_activation_policy(ActivationPolicy::Accessory);
+        }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let resume_signal = resume_signal.clone();
+        options.event_loop_builder = Some(Box::new(move |builder| {
+            crate::platform::resume::windows::configure_event_loop(builder, resume_signal);
         }));
     }
 
@@ -167,6 +176,11 @@ fn run_inner(
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
             let ui_wake = UiWake::from_ctx(&cc.egui_ctx);
+            let resume_monitor = crate::platform::resume::ResumeMonitor::install_eframe(
+                cc,
+                resume_signal.clone(),
+                ui_wake.clone(),
+            );
             let settings_requested = Arc::new(AtomicBool::new(false));
             let tray_icon = crate::tray::create_tray_icon({
                 let settings_requested = settings_requested.clone();
@@ -181,7 +195,14 @@ fn run_inner(
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
 
-            let app = OverlayApp::new(tray_icon, settings_requested, ui_wake, settings, devices);
+            let app = OverlayApp::new(
+                tray_icon,
+                settings_requested,
+                ui_wake,
+                resume_monitor,
+                settings,
+                devices,
+            );
             Ok(Box::new(EframeApp {
                 app,
                 #[cfg(any(target_os = "macos", target_os = "linux"))]

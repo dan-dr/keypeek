@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod connection_flow;
+mod lifecycle;
 mod settings_sync;
 mod state;
 mod ui_overlay;
@@ -24,6 +25,7 @@ pub struct OverlayApp {
     settings: SettingsState,
     session: SessionState,
     connect: ConnectDraftState,
+    resume_monitor: crate::platform::resume::ResumeMonitor,
     startup_status: crate::platform::startup::StartupStatus,
 }
 
@@ -32,6 +34,7 @@ impl OverlayApp {
         tray: crate::tray::Tray,
         settings_requested: Arc<AtomicBool>,
         ui_wake: UiWake,
+        resume_monitor: crate::platform::resume::ResumeMonitor,
         base_settings: Settings,
         available_devices: Vec<DiscoveredDevice>,
     ) -> Self {
@@ -60,6 +63,7 @@ impl OverlayApp {
             session: SessionState {
                 connection: AppConnectionState::Disconnected,
                 ever_connected: false,
+                disconnected_by_user: false,
                 current_identity: None,
                 current_spec: None,
                 current_display_name: String::new(),
@@ -81,6 +85,7 @@ impl OverlayApp {
                 auto_connect: None,
                 discovery_task: None,
             },
+            resume_monitor,
             startup_status: crate::platform::startup::status(),
         };
         if auto_connect_at_start {
@@ -213,6 +218,8 @@ impl OverlayApp {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context, host: &mut dyn OverlayHost) {
+        self.maintain_lifecycle();
+
         if self.settings_requested.swap(false, Ordering::Relaxed) {
             if !self.ui.settings_visible {
                 self.request_device_refresh();

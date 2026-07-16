@@ -106,6 +106,8 @@ Devices are scanned when KeyPeek starts and whenever Settings opens. Use the ref
 
 Successful connections are saved under **Connection** in Settings. Enable **Auto-connect** to try enabled connections in last-connected or manual priority order. KeyPeek makes five passes through the list, waiting three seconds between passes, then stops and shows a failure message. Saved connections can be reordered, disabled, connected, or removed.
 
+After the computer wakes or unlocks, KeyPeek refreshes discovery and starts a new reconnect cycle. An explicit manual disconnect remains disconnected.
+
 **Start KeyPeek on login** appears when the current installation supports it. Starting KeyPeek while it is already running exits the new instance.
 
 To build, sign, and install a development build as an absolute symlink in `~/Applications`, run:

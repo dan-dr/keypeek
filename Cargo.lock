@@ -2549,6 +2549,7 @@ dependencies = [
 name = "keypeek"
 version = "0.7.0"
 dependencies = [
+ "block2 0.6.2",
  "directories",
  "eframe",
  "egui",
@@ -2561,7 +2562,9 @@ dependencies = [
  "image",
  "khronos-egl",
  "lzma-rs",
+ "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "objc2-service-management",
  "qmk-via-api",
  "raw-window-handle",
@@ -2577,6 +2580,7 @@ dependencies = [
  "winit",
  "winreg",
  "winresource",
+ "zbus",
  "zmk-studio-api",
 ]
 

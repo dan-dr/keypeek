@@ -167,6 +167,10 @@ pub fn run(
     egui_ctx.set_fonts(fonts);
 
     let ui_wake = UiWake::new(Arc::new(move || ping.ping()));
+    let resume_monitor = crate::platform::resume::ResumeMonitor::install_headless(
+        crate::platform::resume::ResumeSignal::new(),
+        ui_wake.clone(),
+    );
     let settings_requested = Arc::new(AtomicBool::new(false));
     let tray_icon = crate::tray::create_tray_icon({
         let settings_requested = settings_requested.clone();
@@ -176,7 +180,14 @@ pub fn run(
             ui_wake.request_repaint();
         })
     });
-    let app = OverlayApp::new(tray_icon, settings_requested, ui_wake, settings, devices);
+    let app = OverlayApp::new(
+        tray_icon,
+        settings_requested,
+        ui_wake,
+        resume_monitor,
+        settings,
+        devices,
+    );
 
     let mut state = WaylandApp {
         registry_state: RegistryState::new(&globals),

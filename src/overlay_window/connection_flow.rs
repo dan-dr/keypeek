@@ -122,6 +122,26 @@ fn automatic_candidates(
     candidates
 }
 
+fn reconnect_candidates(
+    mut saved: Vec<SavedConnection>,
+    current: Option<SavedConnection>,
+    auto_connect_enabled: bool,
+) -> Vec<SavedConnection> {
+    if !auto_connect_enabled {
+        return current.into_iter().collect();
+    }
+
+    if let Some(current) = current {
+        if !saved
+            .iter()
+            .any(|candidate| candidate.identity == current.identity)
+        {
+            saved.insert(0, current);
+        }
+    }
+    saved
+}
+
 impl OverlayApp {
     fn sync_picker_to_connected(&mut self, identity: &ConnectionIdentity, spec: &ConnectionSpec) {
         self.connect.selected_device_index = self
@@ -291,6 +311,7 @@ impl OverlayApp {
             keyboard: connected.keyboard,
         };
         self.session.ever_connected = true;
+        self.session.disconnected_by_user = false;
         self.connect.auto_connect = None;
         self.ui.settings_error = None;
         self.ui.settings_warning = (!has_stable_identity).then(|| {
@@ -360,6 +381,7 @@ impl OverlayApp {
             keyboard.disconnect();
         }
         self.connect.auto_connect = None;
+        self.session.disconnected_by_user = true;
         self.session.current_identity = None;
         self.session.current_spec = None;
         self.session.current_display_name.clear();
@@ -466,6 +488,9 @@ impl OverlayApp {
         expected_identity: Option<ConnectionIdentity>,
         origin: ConnectionOrigin,
     ) {
+        if origin == ConnectionOrigin::Manual {
+            self.session.disconnected_by_user = false;
+        }
         let request = ConnectionRequest {
             spec,
             timeout: self.settings.active.timeout,
@@ -518,29 +543,29 @@ impl OverlayApp {
         );
     }
 
-    fn begin_disconnect_reconnect(&mut self) {
+    pub(super) fn begin_disconnect_reconnect(&mut self) {
         let identity = self.session.current_identity.clone();
         let reopen = identity
             .as_ref()
             .filter(|identity| identity.supports_cached_reopen())
             .and(self.session.reopen.clone());
         let auto_connect_enabled = self.settings.active.auto_connect;
-        let candidates = if auto_connect_enabled {
-            self.settings.active.saved_connections.clone()
-        } else {
-            identity
-                .as_ref()
-                .and_then(|identity| {
-                    self.settings
-                        .active
-                        .saved_connections
-                        .iter()
-                        .find(|saved| &saved.identity == identity)
-                        .cloned()
-                })
-                .into_iter()
-                .collect()
-        };
+        let current = identity
+            .as_ref()
+            .zip(self.session.current_spec.as_ref())
+            .map(|(identity, spec)| SavedConnection {
+                enabled: true,
+                display_name: self.session.current_display_name.clone(),
+                identity: identity.clone(),
+                spec: spec.clone(),
+                layout_name: layout_preference(&self.session.active_layout_name),
+                last_connected_at: unix_timestamp(),
+            });
+        let candidates = reconnect_candidates(
+            self.settings.active.saved_connections.clone(),
+            current,
+            auto_connect_enabled,
+        );
         self.begin_automatic_connect(candidates, identity, reopen, auto_connect_enabled);
     }
 
@@ -613,6 +638,9 @@ impl OverlayApp {
                     .pending_origin
                     .take()
                     .unwrap_or(ConnectionOrigin::Manual);
+                if origin == ConnectionOrigin::Manual {
+                    self.resume_monitor.clear_requested();
+                }
                 self.apply_connected_state(connected, origin);
             }
             Some(Err(error)) => {
@@ -640,8 +668,8 @@ impl OverlayApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        automatic_candidates, connected_device_matches, next_auto_connect_step, AutoConnectStep,
-        AUTO_CONNECT_ROUNDS,
+        automatic_candidates, connected_device_matches, next_auto_connect_step,
+        reconnect_candidates, AutoConnectStep, AUTO_CONNECT_ROUNDS,
     };
     use crate::device_discovery::{DeviceKind, DiscoveredDevice};
     use crate::overlay_window::state::AutoConnectState;
@@ -743,6 +771,17 @@ mod tests {
             automatic_candidates(vec![disabled], false, ConnectionPriority::Manual).len(),
             1
         );
+    }
+
+    #[test]
+    fn unsaved_current_connection_is_included_in_automatic_reconnect() {
+        let saved = candidate("Office", "/office.json");
+        let current = candidate("Temporary", "/temporary.json");
+
+        let candidates = reconnect_candidates(vec![saved], Some(current), true);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].display_name, "Temporary");
     }
 
     #[test]

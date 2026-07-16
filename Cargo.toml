@@ -28,6 +28,7 @@ zmk-studio-api = { git = "https://github.com/srwi/zmk-studio-api", features = ["
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+zbus = "5.12.0"
 winit = { version = "0.30.13", features = ["x11"] }
 egui_glow = "0.34.3"
 smithay-client-toolkit = "0.20.0"
@@ -37,13 +38,18 @@ khronos-egl = { version = "6", features = ["static"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30.13"
+block2 = "0.6.2"
+objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3", features = ["NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", features = ["NSNotification", "NSOperation", "block2"] }
 objc2-service-management = { version = "0.3", features = ["objc2", "objc2-foundation", "SMAppService"] }
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62.2", features = ["Devices_Bluetooth", "Devices_Radios", "Foundation"] }
+raw-window-handle = "0.6"
+windows = { version = "0.62.2", features = ["Devices_Bluetooth", "Devices_Radios", "Foundation", "Win32_Foundation", "Win32_System_RemoteDesktop", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.55"
+winit = "0.30.13"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1"

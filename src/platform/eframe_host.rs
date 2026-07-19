@@ -1,4 +1,4 @@
-use super::{OverlayHost, WindowFrame};
+use super::OverlayHost;
 use crate::device_discovery::DiscoveredDevice;
 use crate::overlay_window::OverlayApp;
 use crate::settings::Settings;
@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 struct EframeHost<'a> {
     ctx: &'a egui::Context,
-    last_frame: &'a mut Option<WindowFrame>,
 }
 
 impl OverlayHost for EframeHost<'_> {
@@ -20,45 +19,15 @@ impl OverlayHost for EframeHost<'_> {
     fn request_close(&mut self) {
         self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
-
-    fn set_window_frame(&mut self, frame: WindowFrame) {
-        if self.last_frame.as_ref() == Some(&frame) {
-            return;
-        }
-        apply_window_frame(self.ctx, frame);
-        *self.last_frame = Some(frame);
-    }
-}
-
-fn apply_window_frame(ctx: &egui::Context, frame: WindowFrame) {
-    match frame {
-        WindowFrame::Hidden => {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        }
-        WindowFrame::FullScreen { monitor_size } => {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(0.0, 0.0)));
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(monitor_size));
-            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
-                egui::WindowLevel::AlwaysOnTop,
-            ));
-        }
-        WindowFrame::Content { pos, size } => {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
-                egui::WindowLevel::AlwaysOnTop,
-            ));
-        }
-    }
 }
 
 struct EframeApp {
     app: OverlayApp,
-    last_frame: Option<WindowFrame>,
+    // Undecorated transparent windows don't reliably honor `with_maximized`, so we
+    // size to the monitor explicitly once known. Linux never WM-maximizes at all,
+    // since Mutter drops always-on-top on a maximized window.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    sized_to_monitor: bool,
     // winit's always-on-top request is sent before the window is mapped, which
     // EWMH WMs like Mutter ignore, so re-assert it for a few frames after mapping.
     #[cfg(target_os = "linux")]
@@ -84,10 +53,16 @@ impl eframe::App for EframeApp {
             ctx.request_repaint();
         }
 
-        let mut host = EframeHost {
-            ctx: &ctx,
-            last_frame: &mut self.last_frame,
-        };
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if !self.sized_to_monitor {
+            if let Some(monitor_size) = ctx.input(|i| i.viewport().monitor_size) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(0.0, 0.0)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(monitor_size));
+                self.sized_to_monitor = true;
+            }
+        }
+
+        let mut host = EframeHost { ctx: &ctx };
         self.app.ui(&ctx, &mut host);
     }
 }
@@ -230,7 +205,8 @@ fn run_inner(
             );
             Ok(Box::new(EframeApp {
                 app,
-                last_frame: None,
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                sized_to_monitor: false,
                 #[cfg(target_os = "linux")]
                 x11_above_ticks: 10,
             }))

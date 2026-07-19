@@ -1,6 +1,6 @@
 use crate::device_discovery::{DiscoveredDevice, DiscoveryTask};
-use crate::platform::{OverlayHost, WindowFrame};
-use crate::settings::{Settings, WindowPosition};
+use crate::platform::OverlayHost;
+use crate::settings::Settings;
 use crate::ui_wake::UiWake;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -133,78 +133,6 @@ impl OverlayApp {
         self.ui.mouse_passthrough = Some(mouse_passthrough);
     }
 
-    /// Place a content-sized native window so the keyboard overlay lands on the
-    /// configured screen edge without covering the rest of the desktop.
-    pub(super) fn overlay_content_frame(
-        position: WindowPosition,
-        margin: f32,
-        overlay_size: egui::Vec2,
-        monitor_size: egui::Vec2,
-    ) -> WindowFrame {
-        let pos = match position {
-            WindowPosition::TopLeft => egui::pos2(margin, margin),
-            WindowPosition::TopRight => {
-                egui::pos2(monitor_size.x - overlay_size.x - margin, margin)
-            }
-            WindowPosition::BottomLeft => {
-                egui::pos2(margin, monitor_size.y - overlay_size.y - margin)
-            }
-            WindowPosition::BottomRight => egui::pos2(
-                monitor_size.x - overlay_size.x - margin,
-                monitor_size.y - overlay_size.y - margin,
-            ),
-            WindowPosition::Bottom => egui::pos2(
-                (monitor_size.x - overlay_size.x) * 0.5,
-                monitor_size.y - overlay_size.y - margin,
-            ),
-            WindowPosition::Top => egui::pos2((monitor_size.x - overlay_size.x) * 0.5, margin),
-        };
-        WindowFrame::Content {
-            pos,
-            size: overlay_size,
-        }
-    }
-
-    fn sync_window_frame(
-        &self,
-        ctx: &egui::Context,
-        host: &mut dyn OverlayHost,
-        overlay_visible: bool,
-    ) {
-        let needs_fullscreen = self.ui.settings_visible
-            || self.ui.settings_error.is_some()
-            || self.ui.settings_warning.is_some()
-            || self.ui.notice.is_some();
-
-        let Some(monitor_size) = ctx.input(|i| i.viewport().monitor_size) else {
-            return;
-        };
-
-        let frame = if needs_fullscreen {
-            WindowFrame::FullScreen { monitor_size }
-        } else if overlay_visible {
-            if let AppConnectionState::Connected { keyboard } = &self.session.connection {
-                let size_scale = self.settings.active.size as f32;
-                let (width, height) = keyboard.layout.get_dimensions();
-                Self::overlay_content_frame(
-                    self.settings.active.position,
-                    self.settings.active.margin as f32,
-                    egui::vec2(
-                        (width * size_scale).max(1.0),
-                        (height * size_scale).max(1.0),
-                    ),
-                    monitor_size,
-                )
-            } else {
-                WindowFrame::Hidden
-            }
-        } else {
-            WindowFrame::Hidden
-        };
-
-        host.set_window_frame(frame);
-    }
-
     /// Draw a centered modal with `message` and an OK button that clears `slot`.
     fn message_window(ctx: &egui::Context, title: &str, slot: &mut Option<String>) {
         let Some(message) = slot.clone() else {
@@ -317,7 +245,6 @@ impl OverlayApp {
 
         let visible_layers = self.current_visible_layers();
         let overlay_visible = self.overlay_visible(visible_layers);
-        self.sync_window_frame(ctx, host, overlay_visible);
         if let AppConnectionState::Connected { keyboard } = &self.session.connection {
             self.draw_overlay_window(ctx, keyboard, overlay_visible, visible_layers);
         }
@@ -331,45 +258,5 @@ impl OverlayApp {
         self.draw_notice(ctx);
 
         self.schedule_overlay_hide_repaint(ctx);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::platform::WindowFrame;
-
-    #[test]
-    fn overlay_content_frame_bottom_right() {
-        let frame = OverlayApp::overlay_content_frame(
-            WindowPosition::BottomRight,
-            20.0,
-            egui::vec2(400.0, 200.0),
-            egui::vec2(1440.0, 900.0),
-        );
-        assert_eq!(
-            frame,
-            WindowFrame::Content {
-                pos: egui::pos2(1020.0, 680.0),
-                size: egui::vec2(400.0, 200.0),
-            }
-        );
-    }
-
-    #[test]
-    fn overlay_content_frame_top_center() {
-        let frame = OverlayApp::overlay_content_frame(
-            WindowPosition::Top,
-            10.0,
-            egui::vec2(300.0, 100.0),
-            egui::vec2(1000.0, 800.0),
-        );
-        assert_eq!(
-            frame,
-            WindowFrame::Content {
-                pos: egui::pos2(350.0, 10.0),
-                size: egui::vec2(300.0, 100.0),
-            }
-        );
     }
 }

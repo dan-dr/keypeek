@@ -52,7 +52,7 @@ use egui_glow::glow;
 
 use crate::device_discovery::DiscoveredDevice;
 use crate::overlay_window::OverlayApp;
-use crate::platform::{OverlayHost, WindowFrame};
+use crate::platform::OverlayHost;
 use crate::settings::Settings;
 use crate::ui_wake::UiWake;
 
@@ -74,10 +74,6 @@ impl OverlayHost for WaylandHost {
 
     fn request_close(&mut self) {
         self.close = true;
-    }
-
-    fn set_window_frame(&mut self, _frame: WindowFrame) {
-        // Layer-shell already owns a full-output surface; frame sync is eframe-only.
     }
 }
 

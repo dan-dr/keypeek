@@ -435,13 +435,7 @@ impl OverlayApp {
         visible: bool,
         visible_layers: u32,
     ) {
-        let anchor_params = if self.ui.settings_visible {
-            // Fullscreen backdrop: place the overlay on the configured screen edge.
-            self.get_anchor_params()
-        } else {
-            // Content-sized native window is already positioned; fill it.
-            (egui::Align2::LEFT_TOP, egui::vec2(0.0, 0.0))
-        };
+        let anchor_params = self.get_anchor_params();
         let mut window_open = visible;
         let size = self.settings.active.size as f32;
         let font_scale = self.settings.active.font_size_multiplier;

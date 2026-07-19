@@ -434,8 +434,13 @@ impl OverlayApp {
         keyboard: &Keyboard,
         visible: bool,
         visible_layers: u32,
+        content_sized_host: bool,
     ) {
-        let anchor_params = self.get_anchor_params();
+        let anchor_params = if content_sized_host {
+            (egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+        } else {
+            self.get_anchor_params()
+        };
         let mut window_open = visible;
         let size = self.settings.active.size as f32;
         let font_scale = self.settings.active.font_size_multiplier;

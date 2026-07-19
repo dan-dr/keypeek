@@ -1,6 +1,6 @@
 use crate::device_discovery::{DiscoveredDevice, DiscoveryTask};
-use crate::platform::OverlayHost;
-use crate::settings::Settings;
+use crate::platform::{OverlayHost, WindowFrame};
+use crate::settings::{Settings, WindowPosition};
 use crate::ui_wake::UiWake;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,33 @@ mod ui_settings;
 use state::{
     AppConnectionState, ConnectDraftState, ConnectionDraft, SessionState, SettingsState, UiState,
 };
+
+fn overlay_content_frame(
+    position: WindowPosition,
+    margin: f32,
+    monitor_size: egui::Vec2,
+    content_size: egui::Vec2,
+) -> WindowFrame {
+    let left = margin;
+    let right = (monitor_size.x - content_size.x - margin).max(0.0);
+    let top = margin;
+    let bottom = (monitor_size.y - content_size.y - margin).max(0.0);
+    let center_x = ((monitor_size.x - content_size.x) * 0.5).max(0.0);
+
+    let position = match position {
+        WindowPosition::TopLeft => egui::pos2(left, top),
+        WindowPosition::TopRight => egui::pos2(right, top),
+        WindowPosition::BottomLeft => egui::pos2(left, bottom),
+        WindowPosition::BottomRight => egui::pos2(right, bottom),
+        WindowPosition::Bottom => egui::pos2(center_x, bottom),
+        WindowPosition::Top => egui::pos2(center_x, top),
+    };
+
+    WindowFrame::Content {
+        position,
+        size: content_size,
+    }
+}
 
 pub struct OverlayApp {
     _tray: crate::tray::Tray,
@@ -133,6 +160,43 @@ impl OverlayApp {
         self.ui.mouse_passthrough = Some(mouse_passthrough);
     }
 
+    fn sync_window_frame(
+        &self,
+        host: &mut dyn OverlayHost,
+        overlay_visible: bool,
+    ) -> Option<WindowFrame> {
+        let needs_fullscreen = self.ui.settings_visible
+            || self.ui.settings_error.is_some()
+            || self.ui.settings_warning.is_some()
+            || self.ui.notice.is_some();
+
+        let frame = if needs_fullscreen {
+            host.monitor_size()
+                .map(|monitor_size| WindowFrame::FullScreen { monitor_size })
+        } else if overlay_visible {
+            let AppConnectionState::Connected { keyboard } = &self.session.connection else {
+                return None;
+            };
+            host.monitor_size().map(|monitor_size| {
+                let dimensions = keyboard.layout.get_dimensions();
+                let scale = self.settings.active.size as f32;
+                overlay_content_frame(
+                    self.settings.active.position,
+                    self.settings.active.margin as f32,
+                    monitor_size,
+                    egui::vec2(dimensions.0 * scale, dimensions.1 * scale),
+                )
+            })
+        } else {
+            Some(WindowFrame::Dormant)
+        };
+
+        if let Some(frame) = frame {
+            host.set_window_frame(frame);
+        }
+        frame
+    }
+
     /// Draw a centered modal with `message` and an OK button that clears `slot`.
     fn message_window(ctx: &egui::Context, title: &str, slot: &mut Option<String>) {
         let Some(message) = slot.clone() else {
@@ -245,8 +309,15 @@ impl OverlayApp {
 
         let visible_layers = self.current_visible_layers();
         let overlay_visible = self.overlay_visible(visible_layers);
+        let window_frame = self.sync_window_frame(host, overlay_visible);
         if let AppConnectionState::Connected { keyboard } = &self.session.connection {
-            self.draw_overlay_window(ctx, keyboard, overlay_visible, visible_layers);
+            self.draw_overlay_window(
+                ctx,
+                keyboard,
+                overlay_visible,
+                visible_layers,
+                matches!(window_frame, Some(WindowFrame::Content { .. })),
+            );
         }
 
         if self.ui.settings_visible {
@@ -258,5 +329,44 @@ impl OverlayApp {
         self.draw_notice(ctx);
 
         self.schedule_overlay_hide_repaint(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::overlay_content_frame;
+    use crate::platform::WindowFrame;
+    use crate::settings::WindowPosition;
+
+    #[test]
+    fn positions_content_at_bottom_right_with_margin() {
+        assert_eq!(
+            overlay_content_frame(
+                WindowPosition::BottomRight,
+                10.0,
+                egui::vec2(1920.0, 1080.0),
+                egui::vec2(600.0, 240.0),
+            ),
+            WindowFrame::Content {
+                position: egui::pos2(1310.0, 830.0),
+                size: egui::vec2(600.0, 240.0),
+            }
+        );
+    }
+
+    #[test]
+    fn centers_top_content_and_keeps_margin() {
+        assert_eq!(
+            overlay_content_frame(
+                WindowPosition::Top,
+                12.0,
+                egui::vec2(1440.0, 900.0),
+                egui::vec2(500.0, 200.0),
+            ),
+            WindowFrame::Content {
+                position: egui::pos2(470.0, 12.0),
+                size: egui::vec2(500.0, 200.0),
+            }
+        );
     }
 }

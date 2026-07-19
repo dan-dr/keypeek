@@ -8,6 +8,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+pub const ALL_LAYERS_MASK: u32 = u32::MAX;
+
+fn default_visible_layers() -> u32 {
+    ALL_LAYERS_MASK
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ConnectionPriority {
     #[default]
@@ -44,6 +50,8 @@ pub struct SavedConnection {
     pub identity: ConnectionIdentity,
     pub spec: ConnectionSpec,
     pub layout_name: Option<String>,
+    #[serde(default = "default_visible_layers")]
+    pub visible_layers: u32,
     #[serde(default)]
     pub last_connected_at: u64,
 }
@@ -378,8 +386,10 @@ impl Settings {
 
         let mut index = if let Some(index) = existing_index {
             let enabled = self.saved_connections[index].enabled;
+            let visible_layers = self.saved_connections[index].visible_layers;
             self.saved_connections[index] = SavedConnection {
                 enabled,
+                visible_layers,
                 ..connection
             };
             index
@@ -417,6 +427,7 @@ mod tests {
                 json_path: path.to_string(),
             },
             layout_name: Some("LAYOUT".to_string()),
+            visible_layers: super::ALL_LAYERS_MASK,
             last_connected_at: 1,
         }
     }
@@ -496,6 +507,7 @@ mod tests {
             .saved_connections
             .push(saved_connection("Old name", "/tmp/sofle.json"));
         settings.saved_connections[0].enabled = false;
+        settings.saved_connections[0].visible_layers = 0b0101;
         let mut updated = saved_connection("Sofle", "/tmp/sofle.json");
         updated.last_connected_at = 2;
 
@@ -504,7 +516,18 @@ mod tests {
         assert_eq!(settings.saved_connections.len(), 1);
         assert_eq!(settings.saved_connections[0].display_name, "Sofle");
         assert!(!settings.saved_connections[0].enabled);
+        assert_eq!(settings.saved_connections[0].visible_layers, 0b0101);
         assert_eq!(settings.saved_connections[0].last_connected_at, 2);
+    }
+
+    #[test]
+    fn saved_connection_without_layer_visibility_defaults_to_all_layers() {
+        let mut value = serde_json::to_value(saved_connection("Sofle", "/tmp/sofle.json")).unwrap();
+        value.as_object_mut().unwrap().remove("visible_layers");
+
+        let loaded: SavedConnection = serde_json::from_value(value).unwrap();
+
+        assert_eq!(loaded.visible_layers, super::ALL_LAYERS_MASK);
     }
 
     #[test]

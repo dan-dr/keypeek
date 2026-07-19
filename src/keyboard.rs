@@ -18,6 +18,7 @@ pub struct Keyboard {
     matrix: Arc<Mutex<KeyMatrix>>,
     layer_state: Arc<Mutex<u32>>,
     default_layer_state: Arc<Mutex<u32>>,
+    last_deactivated_layers: Arc<Mutex<u32>>,
     timeout_ms: Arc<Mutex<i64>>,
     alive: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
@@ -47,6 +48,7 @@ impl Keyboard {
 
         let layer_state = Arc::new(Mutex::new(0));
         let default_layer_state = Arc::new(Mutex::new(0));
+        let last_deactivated_layers = Arc::new(Mutex::new(0));
         let time_to_hide_overlay = Arc::new(Mutex::new(Some(Instant::now())));
         let timeout_ms = Arc::new(Mutex::new(timeout));
         let matrix = Arc::new(Mutex::new(matrix));
@@ -74,6 +76,7 @@ impl Keyboard {
             time_to_hide_overlay: Arc::clone(&time_to_hide_overlay),
             layer_state: Arc::clone(&layer_state),
             default_layer_state: Arc::clone(&default_layer_state),
+            last_deactivated_layers: Arc::clone(&last_deactivated_layers),
             timeout_ms: Arc::clone(&timeout_ms),
             alive: Arc::clone(&alive),
             stop_requested: Arc::clone(&stop_requested),
@@ -83,6 +86,7 @@ impl Keyboard {
 
         let layer_state_clone = Arc::clone(&keyboard.layer_state);
         let default_layer_state_clone = Arc::clone(&keyboard.default_layer_state);
+        let last_deactivated_layers_clone = Arc::clone(&keyboard.last_deactivated_layers);
         let time_to_hide_clone = Arc::clone(&keyboard.time_to_hide_overlay);
         let timeout_clone = Arc::clone(&keyboard.timeout_ms);
         let matrix_clone = Arc::clone(&matrix);
@@ -137,6 +141,16 @@ impl Keyboard {
                     let mut layer_bytes = [0u8; 4];
                     layer_bytes[..size].copy_from_slice(&response[2 + size..2 + 2 * size]);
                     let layer_state = u32::from_le_bytes(layer_bytes);
+
+                    let previous_layer_state = *layer_state_clone.lock().unwrap();
+                    let previous_default_layer_state = *default_layer_state_clone.lock().unwrap();
+                    let previous_active_layers =
+                        previous_layer_state | previous_default_layer_state;
+                    let active_layers = layer_state | default_layer_state;
+                    let deactivated_layers = previous_active_layers & !active_layers;
+                    if deactivated_layers != 0 {
+                        *last_deactivated_layers_clone.lock().unwrap() = deactivated_layers;
+                    }
 
                     if layer_state > 1 {
                         *time_to_hide_clone.lock().unwrap() = None;
@@ -193,29 +207,36 @@ impl Keyboard {
         }
     }
 
-    pub fn get_effective_key_layer(&self, row: usize, col: usize) -> (u8, bool) {
+    pub fn get_effective_key_layer(
+        &self,
+        row: usize,
+        col: usize,
+        visible_layers: u32,
+    ) -> (u8, bool) {
         let layer_state = *self.layer_state.lock().unwrap();
         let default_layer_state = *self.default_layer_state.lock().unwrap();
         let matrix = self.matrix.lock().unwrap();
-        let num_layers = matrix.get_num_layers().min(32);
 
-        // Track if there is any active momentary layer above the effective layer
-        // (i.e, key should be shown as background key)
-        let mut active_layer_above = false;
+        resolve_effective_key_layer(
+            &matrix,
+            layer_state,
+            default_layer_state,
+            visible_layers,
+            row,
+            col,
+        )
+    }
 
-        for i in (1..num_layers).rev() {
-            let layer_mask = 1u32 << (i as u32);
-            let is_active_default_layer = (default_layer_state & layer_mask) != 0;
-            let is_active_momentary_layer = (layer_state & layer_mask) != 0;
-            if (is_active_momentary_layer || is_active_default_layer)
-                && !matrix.is_transparent(i, row, col)
-            {
-                return (i as u8, is_active_default_layer && active_layer_above);
-            }
-            active_layer_above |= is_active_momentary_layer;
-        }
+    pub fn get_num_layers(&self) -> usize {
+        self.matrix.lock().unwrap().get_num_layers().min(32)
+    }
 
-        (0, active_layer_above)
+    pub fn active_layers(&self) -> u32 {
+        *self.layer_state.lock().unwrap() | *self.default_layer_state.lock().unwrap()
+    }
+
+    pub fn last_deactivated_layers(&self) -> u32 {
+        *self.last_deactivated_layers.lock().unwrap()
     }
 
     pub fn get_key(&self, layer: usize, row: usize, col: usize) -> Option<LayoutKey> {
@@ -239,8 +260,74 @@ impl Keyboard {
     }
 }
 
+fn resolve_effective_key_layer(
+    matrix: &KeyMatrix,
+    layer_state: u32,
+    default_layer_state: u32,
+    visible_layers: u32,
+    row: usize,
+    col: usize,
+) -> (u8, bool) {
+    let num_layers = matrix.get_num_layers().min(32);
+
+    // Track if there is any active momentary layer above the effective layer
+    // (i.e, key should be shown as background key)
+    let mut active_layer_above = false;
+
+    for i in (1..num_layers).rev() {
+        let layer_mask = 1u32 << (i as u32);
+        if visible_layers & layer_mask == 0 {
+            continue;
+        }
+        let is_active_default_layer = (default_layer_state & layer_mask) != 0;
+        let is_active_momentary_layer = (layer_state & layer_mask) != 0;
+        if (is_active_momentary_layer || is_active_default_layer)
+            && !matrix.is_transparent(i, row, col)
+        {
+            return (i as u8, is_active_default_layer && active_layer_above);
+        }
+        active_layer_above |= is_active_momentary_layer;
+    }
+
+    (0, active_layer_above)
+}
+
 impl Drop for Keyboard {
     fn drop(&mut self) {
         self.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_effective_key_layer;
+    use crate::key_matrix::KeyMatrix;
+    use crate::layout_key::LayoutKey;
+
+    #[test]
+    fn hidden_layers_do_not_override_visible_layers() {
+        let matrix = KeyMatrix::from_layout_keys(
+            vec![
+                vec![vec![Some(LayoutKey::default())]],
+                vec![vec![Some(LayoutKey::default())]],
+                vec![vec![Some(LayoutKey::default())]],
+            ],
+            1,
+            1,
+        );
+        let active_layers = 0b111;
+
+        assert_eq!(
+            resolve_effective_key_layer(&matrix, active_layers, 1, u32::MAX, 0, 0).0,
+            2
+        );
+        assert_eq!(
+            resolve_effective_key_layer(&matrix, active_layers, 1, 0b011, 0, 0).0,
+            1
+        );
+        assert_eq!(
+            resolve_effective_key_layer(&matrix, active_layers, 1, 0b001, 0, 0).0,
+            0
+        );
     }
 }

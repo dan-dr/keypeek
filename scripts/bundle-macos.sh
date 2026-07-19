@@ -26,20 +26,34 @@ fi
 /usr/bin/codesign --verify --strict --verbose=2 "$app"
 
 if [[ "${1:-}" == "--install" ]]; then
-    install_dir="${HOME:?HOME is not set}/Applications"
+    install_dir="/Applications"
     installed_app="$install_dir/KeyPeek.app"
-    mkdir -p "$install_dir"
+    legacy_app="${HOME:?HOME is not set}/Applications/KeyPeek.app"
+    trash_dir="$HOME/.Trash"
+    lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+    if [[ -L "$legacy_app" ]]; then
+        /usr/bin/unlink "$legacy_app"
+        echo "Removed legacy symlink at $legacy_app"
+    elif [[ -e "$legacy_app" ]]; then
+        legacy_backup="$trash_dir/KeyPeek-legacy.app.backup-$(date +%s)"
+        echo "Moving legacy app to Trash at $legacy_backup"
+        mv "$legacy_app" "$legacy_backup"
+    fi
 
     if [[ -L "$installed_app" ]]; then
-        unlink "$installed_app"
+        /usr/bin/unlink "$installed_app"
     elif [[ -e "$installed_app" ]]; then
-        backup_app="$install_dir/KeyPeek.app.backup-$(date +%s)"
-        echo "Preserving existing app at $backup_app"
+        backup_app="$trash_dir/KeyPeek.app.backup-$(date +%s)"
+        echo "Moving existing app to Trash at $backup_app"
         mv "$installed_app" "$backup_app"
     fi
 
-    ln -s "$app" "$installed_app"
-    echo "Installed $installed_app -> $app"
+    /usr/bin/ditto "$app" "$installed_app"
+    /usr/bin/codesign --verify --strict --verbose=2 "$installed_app"
+    "$lsregister" -f "$installed_app"
+    /usr/bin/mdimport "$installed_app" >/dev/null 2>&1 || true
+    echo "Installed $installed_app"
 fi
 
 echo "$app"

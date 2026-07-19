@@ -6,7 +6,7 @@ use super::OverlayApp;
 use crate::connection::{ConnectedState, ConnectionRequest, ConnectionTask};
 use crate::device_discovery::{DeviceKind, DiscoveredDevice};
 use crate::protocols::{ConnectionIdentity, ConnectionSpec, ZmkTransportConfig};
-use crate::settings::{ConnectionPriority, SavedConnection};
+use crate::settings::{ConnectionPriority, SavedConnection, ALL_LAYERS_MASK};
 use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -288,6 +288,7 @@ impl OverlayApp {
             identity: connected.identity.clone(),
             spec: connected.spec.clone(),
             layout_name: saved_layout,
+            visible_layers: ALL_LAYERS_MASK,
             last_connected_at: unix_timestamp(),
         };
 
@@ -559,6 +560,7 @@ impl OverlayApp {
                 identity: identity.clone(),
                 spec: spec.clone(),
                 layout_name: layout_preference(&self.session.active_layout_name),
+                visible_layers: ALL_LAYERS_MASK,
                 last_connected_at: unix_timestamp(),
             });
         let candidates = reconnect_candidates(
@@ -674,7 +676,7 @@ mod tests {
     use crate::device_discovery::{DeviceKind, DiscoveredDevice};
     use crate::overlay_window::state::AutoConnectState;
     use crate::protocols::{ConnectionIdentity, ConnectionSpec};
-    use crate::settings::{ConnectionPriority, SavedConnection};
+    use crate::settings::{ConnectionPriority, SavedConnection, ALL_LAYERS_MASK};
     use std::time::Instant;
 
     fn candidate(name: &str, path: &str) -> SavedConnection {
@@ -690,6 +692,7 @@ mod tests {
                 json_path: path.to_string(),
             },
             layout_name: None,
+            visible_layers: ALL_LAYERS_MASK,
             last_connected_at: 0,
         }
     }

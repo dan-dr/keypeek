@@ -22,6 +22,7 @@ KeyPeek currently keeps one connection recipe in memory. It cannot reconnect aft
 - Auto-connect enabled connections in priority order for five rounds, waiting three seconds between rounds.
 - Listen for native wake and unlock notifications behind one shared lifecycle signal, refresh discovery, and start a fresh reconnect cycle. Preserve an explicit manual disconnect across resume events.
 - Support last-connected and manual ordering. Manual ordering uses egui drag and drop.
+- Store a 32-bit visible-layer mask with each saved connection. Existing connections default to all layers, and reconnects preserve the user's mask.
 - Refresh device discovery asynchronously whenever Settings opens and from an explicit refresh control.
 - Implement startup registration behind one platform interface: `SMAppService` on macOS, the per-user Run registry key on Windows, and an XDG autostart desktop entry on Linux.
 - Show startup registration only when the platform backend reports that the current executable is installed in a stable, supported form. macOS additionally requires a signed app bundle.
@@ -47,6 +48,7 @@ Rejected. A lock screen does not reliably suspend the app, and wall-clock change
 ## Consequences
 
 - Existing settings remain compatible because new fields have defaults.
+- Layer visibility follows the saved keyboard identity rather than applying one global layer-number preference to every keyboard.
 - QMK JSON files remain external source artifacts; KeyPeek stores only their canonical paths.
 - Two QMK devices with the same VID/PID and canonical JSON path intentionally share one saved connection recipe.
 - Linux and Windows startup registration do not pretend to have macOS-style signing semantics.

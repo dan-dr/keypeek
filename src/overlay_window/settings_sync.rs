@@ -1,8 +1,31 @@
 use super::state::AppConnectionState;
 use super::OverlayApp;
-use crate::settings::{ProtocolType, WindowPosition};
+use crate::settings::{ProtocolType, WindowPosition, ALL_LAYERS_MASK};
 use egui::Align2;
 use std::time::Instant;
+
+fn layer_selection_allows_overlay(
+    active_layers: u32,
+    last_deactivated_layers: u32,
+    visible_layers: u32,
+    base_timeout_active: Option<bool>,
+) -> bool {
+    let active_non_base_layers = active_layers & !1;
+    if active_non_base_layers != 0 {
+        return active_non_base_layers & visible_layers != 0;
+    }
+    if visible_layers & 1 == 0 {
+        return false;
+    }
+
+    match base_timeout_active {
+        Some(timeout_active) => {
+            (last_deactivated_layers == 0 || last_deactivated_layers & visible_layers != 0)
+                && timeout_active
+        }
+        None => true,
+    }
+}
 
 impl OverlayApp {
     pub(super) fn apply_live_visual_settings(&mut self) {
@@ -124,19 +147,82 @@ impl OverlayApp {
         }
     }
 
-    pub(super) fn overlay_visible(&self) -> bool {
+    pub(super) fn current_visible_layers(&self) -> u32 {
+        let Some(identity) = self.session.current_identity.as_ref() else {
+            return ALL_LAYERS_MASK;
+        };
+
+        self.settings
+            .active
+            .saved_connections
+            .iter()
+            .find(|connection| &connection.identity == identity)
+            .map_or(ALL_LAYERS_MASK, |connection| connection.visible_layers)
+    }
+
+    pub(super) fn overlay_visible(&self, visible_layers: u32) -> bool {
         match &self.session.connection {
             AppConnectionState::Disconnected | AppConnectionState::AutoConnecting => false,
             AppConnectionState::Connected { keyboard } => {
                 if self.ui.settings_visible {
                     true
                 } else {
-                    match keyboard.time_to_hide_overlay.lock().unwrap().as_ref() {
-                        Some(time_to_hide) => Instant::now() < *time_to_hide,
-                        None => true,
-                    }
+                    let time_to_hide = *keyboard.time_to_hide_overlay.lock().unwrap();
+                    layer_selection_allows_overlay(
+                        keyboard.active_layers(),
+                        keyboard.last_deactivated_layers(),
+                        visible_layers,
+                        time_to_hide.map(|time_to_hide| Instant::now() < time_to_hide),
+                    )
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::layer_selection_allows_overlay;
+
+    #[test]
+    fn selected_active_layer_shows_and_hidden_active_layer_stays_hidden() {
+        let visible_layers = 0b0011;
+
+        assert!(layer_selection_allows_overlay(
+            0b0011,
+            0,
+            visible_layers,
+            Some(false)
+        ));
+        assert!(!layer_selection_allows_overlay(
+            0b0101,
+            0,
+            visible_layers,
+            Some(true)
+        ));
+    }
+
+    #[test]
+    fn base_preview_only_follows_a_selected_layer() {
+        let visible_layers = 0b0011;
+
+        assert!(layer_selection_allows_overlay(
+            0b0001,
+            0b0010,
+            visible_layers,
+            Some(true)
+        ));
+        assert!(!layer_selection_allows_overlay(
+            0b0001,
+            0b0100,
+            visible_layers,
+            Some(true)
+        ));
+        assert!(!layer_selection_allows_overlay(
+            0b0001,
+            0b0010,
+            0b0010,
+            Some(true)
+        ));
     }
 }

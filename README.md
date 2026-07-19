@@ -106,16 +106,20 @@ Devices are scanned when KeyPeek starts and whenever Settings opens. Use the ref
 
 Successful connections are saved under **Connection** in Settings. Enable **Auto-connect** to try enabled connections in last-connected or manual priority order. KeyPeek makes five passes through the list, waiting three seconds between passes, then stops and shows a failure message. Saved connections can be reordered, disabled, connected, or removed.
 
+Use **Layer Visibility** while connected to choose which layers that keyboard shows. The selection is saved per keyboard. Unchecked layers neither open the overlay nor override a selected layer; Layer 0 controls the base-layer preview after a layer closes.
+
 After the computer wakes or unlocks, KeyPeek refreshes discovery and starts a new reconnect cycle. An explicit manual disconnect remains disconnected.
 
 **Start KeyPeek on login** appears when the current installation supports it. Starting KeyPeek while it is already running exits the new instance.
 
-To build, sign, and install a development build as an absolute symlink in `~/Applications`, run:
+To build, sign, and install a development build as a real app bundle in `/Applications`, run:
 
 ```bash
 export KEYPEEK_CODESIGN_IDENTITY="Apple Development: you@example.com (TEAMID)"
 scripts/bundle-macos.sh --install
 ```
+
+The installer removes the old `~/Applications` symlink, copies the signed bundle into `/Applications`, and registers it with LaunchServices so Finder and launchers such as Raycast resolve the current build.
 
 <img src=".github/assets/settings_window.png" alt="Settings window screenshot" width="60%">
 

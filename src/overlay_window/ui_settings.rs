@@ -1,7 +1,7 @@
 use super::state::AppConnectionState;
 use super::OverlayApp;
 use crate::protocols::{ConnectionSpec, ZmkTransportConfig};
-use crate::settings::{ConnectionPriority, SavedConnection, WindowPosition};
+use crate::settings::{ConnectionPriority, SavedConnection, WindowPosition, ALL_LAYERS_MASK};
 use egui::Window;
 
 impl OverlayApp {
@@ -323,6 +323,81 @@ impl OverlayApp {
         }
     }
 
+    fn draw_layer_visibility(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Layer Visibility");
+        ui.add_space(8.0);
+
+        let layer_count = match &self.session.connection {
+            AppConnectionState::Connected { keyboard } => keyboard.get_num_layers(),
+            AppConnectionState::Disconnected | AppConnectionState::AutoConnecting => {
+                ui.label(
+                    egui::RichText::new("Connect a keyboard to choose its visible layers.").weak(),
+                );
+                return;
+            }
+        };
+        let Some(identity) = self.session.current_identity.as_ref() else {
+            ui.label(egui::RichText::new("This connection cannot save layer choices.").weak());
+            return;
+        };
+        let Some(connection) = self
+            .settings
+            .draft
+            .saved_connections
+            .iter_mut()
+            .find(|connection| &connection.identity == identity)
+        else {
+            ui.label(egui::RichText::new("This connection cannot save layer choices.").weak());
+            return;
+        };
+
+        ui.horizontal(|ui| {
+            ui.label("Show:");
+            if ui.small_button("All").clicked() {
+                connection.visible_layers = ALL_LAYERS_MASK;
+            }
+            if ui.small_button("None").clicked() {
+                connection.visible_layers = 0;
+            }
+        });
+        ui.add_space(4.0);
+
+        egui::Grid::new("visible_layers_grid")
+            .num_columns(4)
+            .spacing([14.0, 6.0])
+            .show(ui, |ui| {
+                for layer in 0..layer_count {
+                    let layer_mask = 1u32 << layer;
+                    let mut visible = connection.visible_layers & layer_mask != 0;
+                    if ui
+                        .checkbox(&mut visible, format!("Layer {layer}"))
+                        .changed()
+                    {
+                        if visible {
+                            connection.visible_layers |= layer_mask;
+                        } else {
+                            connection.visible_layers &= !layer_mask;
+                        }
+                    }
+                    if layer % 4 == 3 {
+                        ui.end_row();
+                    }
+                }
+                if layer_count % 4 != 0 {
+                    ui.end_row();
+                }
+            });
+
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Unchecked layers do not open the overlay or override a selected layer.",
+            )
+            .weak()
+            .small(),
+        );
+    }
+
     fn timeout_to_ui_value(timeout: i64) -> u32 {
         if timeout < 0 {
             15_000
@@ -361,6 +436,12 @@ impl OverlayApp {
                     .show(ui, |ui| {
                         ui.group(|ui| {
                             self.draw_connection_group(ui);
+                        });
+
+                        ui.add_space(10.0);
+
+                        ui.group(|ui| {
+                            self.draw_layer_visibility(ui);
                         });
 
                         ui.add_space(10.0);

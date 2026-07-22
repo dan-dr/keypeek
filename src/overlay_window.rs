@@ -44,6 +44,19 @@ fn overlay_content_frame(
     }
 }
 
+fn non_overlay_window_frame(
+    needs_fullscreen: bool,
+    monitor_size: Option<egui::Vec2>,
+) -> Option<WindowFrame> {
+    monitor_size.map(|monitor_size| {
+        if needs_fullscreen {
+            WindowFrame::FullScreen { monitor_size }
+        } else {
+            WindowFrame::Dormant
+        }
+    })
+}
+
 pub struct OverlayApp {
     _tray: crate::tray::Tray,
     settings_requested: Arc<AtomicBool>,
@@ -170,14 +183,14 @@ impl OverlayApp {
             || self.ui.settings_warning.is_some()
             || self.ui.notice.is_some();
 
+        let monitor_size = host.monitor_size();
         let frame = if needs_fullscreen {
-            host.monitor_size()
-                .map(|monitor_size| WindowFrame::FullScreen { monitor_size })
+            non_overlay_window_frame(true, monitor_size)
         } else if overlay_visible {
             let AppConnectionState::Connected { keyboard } = &self.session.connection else {
                 return None;
             };
-            host.monitor_size().map(|monitor_size| {
+            monitor_size.map(|monitor_size| {
                 let dimensions = keyboard.layout.get_dimensions();
                 let scale = self.settings.active.size as f32;
                 overlay_content_frame(
@@ -188,7 +201,10 @@ impl OverlayApp {
                 )
             })
         } else {
-            Some(WindowFrame::Dormant)
+            // Keep the initial maximized viewport until its monitor geometry is
+            // known. Shrinking it to 1x1 first makes the size unavailable, so
+            // Settings cannot restore a usable fullscreen window later.
+            non_overlay_window_frame(false, monitor_size)
         };
 
         if let Some(frame) = frame {
@@ -334,7 +350,7 @@ impl OverlayApp {
 
 #[cfg(test)]
 mod tests {
-    use super::overlay_content_frame;
+    use super::{non_overlay_window_frame, overlay_content_frame};
     use crate::platform::WindowFrame;
     use crate::settings::WindowPosition;
 
@@ -367,6 +383,21 @@ mod tests {
                 position: egui::pos2(470.0, 12.0),
                 size: egui::vec2(500.0, 200.0),
             }
+        );
+    }
+
+    #[test]
+    fn waits_for_monitor_geometry_before_entering_dormant_mode() {
+        assert_eq!(non_overlay_window_frame(false, None), None);
+        assert_eq!(
+            non_overlay_window_frame(false, Some(egui::vec2(1920.0, 1080.0))),
+            Some(WindowFrame::Dormant)
+        );
+        assert_eq!(
+            non_overlay_window_frame(true, Some(egui::vec2(1920.0, 1080.0))),
+            Some(WindowFrame::FullScreen {
+                monitor_size: egui::vec2(1920.0, 1080.0),
+            })
         );
     }
 }

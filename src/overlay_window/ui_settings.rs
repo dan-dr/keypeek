@@ -4,6 +4,18 @@ use crate::protocols::{ConnectionSpec, ZmkTransportConfig};
 use crate::settings::{ConnectionPriority, SavedConnection, WindowPosition, ALL_LAYERS_MASK};
 use egui::Window;
 
+fn settings_window_size(viewport_size: egui::Vec2) -> egui::Vec2 {
+    const WIDTH: f32 = 520.0;
+    const MAX_HEIGHT: f32 = 1_000.0;
+    const HORIZONTAL_MARGIN: f32 = 80.0;
+    const VERTICAL_MARGIN: f32 = 96.0;
+
+    egui::vec2(
+        WIDTH.min((viewport_size.x - HORIZONTAL_MARGIN).max(1.0)),
+        MAX_HEIGHT.min((viewport_size.y - VERTICAL_MARGIN).max(1.0)),
+    )
+}
+
 impl OverlayApp {
     fn connection_details(connection: &SavedConnection) -> (String, Option<String>) {
         match &connection.spec {
@@ -420,16 +432,13 @@ impl OverlayApp {
         host: &mut dyn crate::platform::OverlayHost,
     ) {
         let mut open = self.ui.settings_visible;
-
-        let settings_window_size = egui::vec2(450.0, 700.0);
-        let settings_window_pos = ctx.viewport_rect().center() - settings_window_size * 0.5;
+        let settings_window_size = settings_window_size(ctx.viewport_rect().size());
 
         Window::new("KeyPeek Settings")
             .open(&mut open)
-            .default_size(settings_window_size)
-            .default_pos(settings_window_pos)
+            .fixed_size(settings_window_size)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .collapsible(false)
-            .resizable(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -623,5 +632,26 @@ impl OverlayApp {
                 host.request_close();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::settings_window_size;
+
+    #[test]
+    fn settings_window_uses_available_desktop_height() {
+        assert_eq!(
+            settings_window_size(egui::vec2(1_440.0, 900.0)),
+            egui::vec2(520.0, 804.0)
+        );
+    }
+
+    #[test]
+    fn settings_window_caps_height_on_large_displays() {
+        assert_eq!(
+            settings_window_size(egui::vec2(3_840.0, 2_160.0)),
+            egui::vec2(520.0, 1_000.0)
+        );
     }
 }
